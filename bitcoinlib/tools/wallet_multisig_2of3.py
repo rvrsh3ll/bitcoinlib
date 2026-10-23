@@ -5,7 +5,7 @@
 #    Create a multisig 2-of-3 wallet with Mnemonic passphrase keys, so wallet contains 3 keys and 2 signatures are
 #    needed to sign a transaction / send a payment.
 #
-#    Transaction are created and signed with 1 signature on the online PC, on the other offline PC the transaction is
+#    Transactions are created and signed with 1 signature on the online PC, on the other offline PC the transaction is
 #    signed with a second private key. The third key is a stored on a paper in case one of the others keys is lost.
 #
 #    © 2017 - 2019 December - 1200 Web Development <http://1200wd.com/>
@@ -71,7 +71,7 @@ if not wallet_exists(WALLET_NAME):
                 key_lists[w[0]].append(addkey)
 
     offline_wallet = Wallet.create(WALLET_NAME, key_lists['Offline PC'], sigs_required=SIGNATURES_REQUIRED,
-                                     witness_type=WITNESS_TYPE, network=NETWORK)
+                                   witness_type=WITNESS_TYPE, network=NETWORK)
     offline_wallet.new_key()
 
     print("\n\nA multisig wallet has been created on this system")

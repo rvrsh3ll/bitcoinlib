@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Client for Bcoin Node
-#    © 2019 June - 1200 Web Development <http://1200wd.com/>
+#    © 2019 - 2024 June - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -46,25 +46,20 @@ class BcoinClient(BaseClient):
             variables = {}
         return self.request(url_path, variables, method, secure=False)
 
-    def _parse_transaction(self, tx, strict=True):
+    def _parse_transaction(self, tx):
         status = 'unconfirmed'
         if tx['confirmations']:
             status = 'confirmed'
         t = Transaction.parse_hex(tx['hex'], strict=False, network=self.network)
-        if not t.txid == tx['hash']:
-            if strict:
-                raise ClientError('Received transaction has different txid')
-            else:
-                t.txid = tx['hash']
-                _logger.warning('Received transaction has different txid')
         t.locktime = tx['locktime']
         t.network = self.network
         t.fee = tx['fee']
-        t.date = datetime.utcfromtimestamp(tx['time']) if tx['time'] else None
+        t.date = datetime.fromtimestamp(tx['time'], timezone.utc) if tx['time'] else None
         t.confirmations = tx['confirmations']
         t.block_height = tx['height'] if tx['height'] > 0 else None
         t.block_hash = tx['block']
         t.status = status
+        t.index = tx['index']
         if not t.coinbase:
             for i in t.inputs:
                 i.value = tx['inputs'][t.inputs.index(i)]['coin']['value']
@@ -79,12 +74,12 @@ class BcoinClient(BaseClient):
         for address in addresslist:
             # First get all transactions for this address from the blockchain
             srv = Service(network=self.network.name, providers=['bcoin'])
-            txs = srv.gettransactions(address, limit=25)
+            txs = srv.gettransactions(address, limit=MAX_TRANSACTIONS)
 
             # Fail if large number of transactions are found
             if not srv.complete:
-                raise ClientError("If not all transactions known, we cannot determine utxo's. "
-                                  "Increase limit or use other provider")
+                raise ClientError("If not all transactions are known, we cannot determine utxo's. "
+                                  "Increase limit or use other provider.")
 
             for a in [output for outputs in [t.outputs for t in txs] for output in outputs]:
                 if a.address == address:
@@ -92,25 +87,22 @@ class BcoinClient(BaseClient):
             for a in [i for inputs in [t.inputs for t in txs] for i in inputs]:
                 if a.address == address:
                     balance -= a.value
-        return int(balance)
+        return round(balance)
 
     def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
         # First get all transactions for this address from the blockchain
-        from bitcoinlib.services.services import Service
-        srv = Service(network=self.network.name, providers=['bcoin'])
-        txs = srv.gettransactions(address, limit=25)
+        txs = self.gettransactions(address, limit=200)
 
         # Fail if large number of transactions are found
-        if not srv.complete:
-            raise ClientError("If not all transactions known, we cannot determine utxo's. "
-                              "Increase limit or use other provider")
+        if len(txs) >= 200:
+            raise ClientError("If not all transactions are known, we cannot determine utxo's")
 
         utxos = []
         for tx in txs:
             for unspent in tx.outputs:
                 if unspent.address != address:
                     continue
-                if not srv.isspent(tx.txid, unspent.output_n):
+                if not self.isspent(tx.txid, unspent.output_n):
                     utxos.append(
                         {
                             'address': unspent.address,
@@ -138,14 +130,14 @@ class BcoinClient(BaseClient):
         assert(limit > 0)
         txs = []
         while True:
-            variables = {'limit': limit, 'after': after_txid}
+            variables = {'limit': 100, 'after': after_txid}
             res = self.compose_request('tx', 'address', address, variables)
             for tx in res:
                 txs.append(self._parse_transaction(tx))
             if not txs or len(txs) >= limit:
                 break
-            if len(res) == limit:
-                after_txid = res[limit-1]['hash']
+            if len(res) == 100:
+                after_txid = res[99]['hash']
             else:
                 break
 
@@ -157,16 +149,17 @@ class BcoinClient(BaseClient):
     def getrawtransaction(self, txid):
         return self.compose_request('tx', txid)['hex']
 
-    def sendrawtransaction(self, rawtx):
-        res = self.compose_request('broadcast', variables={'tx': rawtx}, method='post')
-        txid = ''
-        if 'success' in res and res['success']:
-            t = Transaction.parse_hex(rawtx, strict=False, network=self.network)
-            txid = t.txid
-        return {
-            'txid': txid,
-            'response_dict': res
-        }
+    # Gives a false success response for invalid transactions!
+    # def sendrawtransaction(self, rawtx):
+    #     res = self.compose_request('broadcast', variables={'tx': rawtx}, method='post')
+    #     txid = ''
+    #     if 'success' in res and res['success']:
+    #         t = Transaction.parse_hex(rawtx, network=self.network)
+    #         txid = t.txid
+    #     return {
+    #         'txid': txid,
+    #         'response_dict': res
+    #     }
 
     def estimatefee(self, blocks):
         if blocks > 15:
@@ -189,7 +182,6 @@ class BcoinClient(BaseClient):
 
     def getblock(self, blockid, parse_transactions, page, limit):
         block = self.compose_request('block', str(blockid))
-        # FIXME: This doesnt work if page or limit is used, also see pages calc below
         block['tx_count'] = len(block['txs'])
         txs = block['txs']
         parsed_txs = []
@@ -201,8 +193,7 @@ class BcoinClient(BaseClient):
             tx['height'] = block['height']
             tx['block'] = block['hash']
             if parse_transactions:
-                # FIXME: Parse all transactions as strict=True
-                t = self._parse_transaction(tx, strict=False)
+                t = self._parse_transaction(tx)
                 parsed_txs.append(t)
             else:
                 parsed_txs.append(tx['hash'])
@@ -217,7 +208,20 @@ class BcoinClient(BaseClient):
         block['block_hash'] = block.pop('hash')
         return block
 
-    # def getrawblock
+    def getrawblock(self, blockid):
+        try:
+            blockid = int(blockid)
+            data = {
+                "method": "getblockbyheight",
+                "params": [blockid, 0, 0]
+            }
+        except ValueError:
+            data = {
+                "method": "getblock",
+                "params": [blockid, 0, 0]
+            }
+        res = self.compose_request('', method='post', variables=data)
+        return res['result']
 
     def isspent(self, txid, index):
         try:

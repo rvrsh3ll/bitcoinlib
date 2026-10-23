@@ -2,7 +2,8 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    blockchain_info client
-#    © 2017-2019 July - 1200 Web Development <http://1200wd.com/>
+#    1200 Web Development <http://1200wd.com/>
+#    © 2017 - 2025 May
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -19,7 +20,7 @@
 #
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from bitcoinlib.main import MAX_TRANSACTIONS
 from bitcoinlib.services.baseclient import BaseClient
 from bitcoinlib.transactions import Transaction
@@ -69,16 +70,17 @@ class BlockchainInfoClient(BaseClient):
                 'block_height': None,
                 'fee': None,
                 'size': 0,
-                'value': int(round(utxo['value'] * self.units, 0)),
+                'value': round(utxo['value'] * self.units),
                 'script': utxo['script'],
                 'date': None
             })
         return utxos[::-1][:limit]
 
     def gettransaction(self, txid, latest_block=None):
+        self.latest_block = self.latest_block if not latest_block else latest_block
         tx = self.compose_request('rawtx', txid)
         rawtx = self.getrawtransaction(txid)
-        t = Transaction.parse_hex(rawtx, strict=False, network=self.network)
+        t = Transaction.parse_hex(rawtx, strict=self.strict, network=self.network)
         input_total = 0
         for n, i in enumerate(t.inputs):
             if 'prev_out' in tx['inputs'][n]:
@@ -87,14 +89,14 @@ class BlockchainInfoClient(BaseClient):
         for n, o in enumerate(t.outputs):
             o.spent = tx['out'][n]['spent']
         if 'block_height' in tx and tx['block_height']:
-            if not latest_block:
-                latest_block = self.blockcount()
+            if not self.latest_block:
+                self.latest_block = self.blockcount()
             t.status = 'confirmed'
-            t.date = datetime.utcfromtimestamp(tx['time'])
+            t.date = datetime.fromtimestamp(tx['time'], timezone.utc)
             t.block_height = tx['block_height']
             t.confirmations = 1
-            if latest_block > t.block_height:
-                t.confirmations = latest_block - t.block_height
+            if self.latest_block > t.block_height:
+                t.confirmations = self.latest_block - t.block_height
         else:
             t.status = 'unconfirmed'
             t.confirmations = 0
@@ -116,15 +118,15 @@ class BlockchainInfoClient(BaseClient):
         txids = []
         variables = {'limit': 100}
         res = self.compose_request('rawaddr', address, variables=variables)
-        latest_block = self.blockcount()
+        self.latest_block = self.blockcount() if not self.latest_block else self.latest_block
         for tx in res['txs']:
             if tx['hash'] not in txids:
                 txids.insert(0, tx['hash'])
         if after_txid:
             txids = txids[txids.index(after_txid) + 1:]
         for txid in txids[:limit]:
-            t = self.gettransaction(txid, latest_block=latest_block)
-            t.confirmations = 0 if not t.block_height else latest_block - t.block_height
+            t = self.gettransaction(txid, latest_block=self.latest_block)
+            t.confirmations = 0 if not t.block_height else self.latest_block - t.block_height
             txs.append(t)
         return txs
 
@@ -152,10 +154,10 @@ class BlockchainInfoClient(BaseClient):
         bd = self.compose_request('rawblock', str(blockid))
         if parse_transactions:
             txs = []
-            latest_block = self.blockcount()
+            self.latest_block = self.blockcount() if not self.latest_block else self.latest_block
             for tx in bd['tx'][(page-1)*limit:page*limit]:
                 # try:
-                txs.append(self.gettransaction(tx['hash'], latest_block=latest_block))
+                txs.append(self.gettransaction(tx['hash'], latest_block=self.latest_block))
                 # except Exception as e:
                 #     _logger.error("Could not parse tx %s with error %s" % (tx['hash'], e))
         else:
@@ -193,6 +195,6 @@ class BlockchainInfoClient(BaseClient):
             'blockcount': info['n_blocks_total'],
             'chain': '',
             'difficulty': info['difficulty'],
-            'hashrate': int(float(info['hash_rate'] * 10**9)),
+            'hashrate': round(float(info['hash_rate'] * 10**9)),
             'mempool_size': unconfirmed,
         }

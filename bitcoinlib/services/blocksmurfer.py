@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Blocksmurfer client
-#    © 2020 Januari - 1200 Web Development <http://1200wd.com/>
+#    © 2020 - 2025 May - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -19,8 +19,9 @@
 #
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from bitcoinlib.main import MAX_TRANSACTIONS
+from bitcoinlib.keys import Address
 from bitcoinlib.services.baseclient import BaseClient, ClientError
 from bitcoinlib.transactions import Transaction
 
@@ -32,8 +33,8 @@ _logger = logging.getLogger(__name__)
 
 class BlocksmurferClient(BaseClient):
 
-    def __init__(self, network, base_url, denominator, *args):
-        super(self.__class__, self).__init__(network, PROVIDERNAME, base_url, denominator, *args)
+    def __init__(self, network, base_url, denominator, api_key, *args):
+        super(self.__class__, self).__init__(network, PROVIDERNAME, base_url, denominator, api_key, *args)
 
     def compose_request(self, function, parameter='', parameter2='', variables=None, post_data='', method='get'):
         url_path = function
@@ -43,9 +44,10 @@ class BlocksmurferClient(BaseClient):
             url_path += '/' + str(parameter2)
         if variables is None:
             variables = {}
+        header = {}
         if self.api_key:
-            variables.update({'token': self.api_key})
-        return self.request(url_path, variables, method, post_data=post_data)
+            header = {'auth-key': self.api_key}
+        return self.request(url_path, variables, method, post_data=post_data, header=header)
 
     def getbalance(self, addresslist):
         balance = 0
@@ -56,16 +58,16 @@ class BlocksmurferClient(BaseClient):
 
     def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
         res = self.compose_request('utxos', address, variables={'after_txid': after_txid})
-        block_count = self.blockcount()
+        self.latest_block = self.blockcount() if not self.latest_block else self.latest_block
         utxos = []
         for u in res:
             block_height = None if not u['block_height'] else u['block_height']
             confirmations = u['confirmations']
             if block_height and not confirmations:
-                confirmations = block_count - block_height
+                confirmations = self.latest_block - block_height
             utxos.append({
                 'address': address,
-                'txid': u['tx_hash'],
+                'txid': u['txid'],
                 'confirmations': confirmations,
                 'output_n': u['output_n'],
                 'input_n': u['input_n'],
@@ -74,45 +76,46 @@ class BlocksmurferClient(BaseClient):
                 'size': u['size'],
                 'value': u['value'],
                 'script': u['script'],
-                'date': datetime.strptime(u['date'][:19], "%Y-%m-%dT%H:%M:%S")
+                'date': None if not u['date'] else datetime.strptime(u['date'][:19], "%Y-%m-%dT%H:%M:%S").replace(
+                    tzinfo=timezone.utc)
             })
         return utxos[:limit]
 
-    def _parse_transaction(self, tx, block_count=None):
-        block_height = None if not tx['block_height'] else tx['block_height']
+    def _parse_transaction(self, tx, block_height=None):
+        block_height = block_height if not tx['block_height'] else tx['block_height']
         confirmations = tx['confirmations']
         if block_height and not confirmations and tx['status'] == 'confirmed':
-            if not block_count:
-                block_count = self.blockcount()
-            confirmations = block_count - block_height
-        tx_date = None if not tx.get('date') else datetime.strptime(tx['date'], "%Y-%m-%dT%H:%M:%S")
-        # FIXME: Blocksmurfer returns 'date' or 'time', should be consistent
-        if not tx_date and 'time' in tx:
-            tx_date = datetime.utcfromtimestamp(tx['time'])
+            self.latest_block = self.blockcount() if not self.latest_block else self.latest_block
+            confirmations = self.latest_block - block_height
+        tx_date = None if not tx.get('date') else (
+            datetime.strptime(tx['date'][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc))
         t = Transaction(locktime=tx['locktime'], version=tx['version'], network=self.network,
                         fee=tx['fee'], size=tx['size'], txid=tx['txid'], date=tx_date, input_total=tx['input_total'],
                         output_total=tx['output_total'], confirmations=confirmations, block_height=block_height,
                         status=tx['status'], coinbase=tx['coinbase'], rawtx=bytes.fromhex(tx['raw_hex']),
                         witness_type=tx['witness_type'])
         for ti in tx['inputs']:
+            address = ti['address'] if not self.network_overrides else (
+                Address.parse(ti['address'], network_overrides=self.network_overrides).address)
             t.add_input(prev_txid=ti['prev_txid'], output_n=ti['output_n'], keys=ti.get('keys', []),
                         index_n=ti['index_n'], unlocking_script=ti['script'], value=ti['value'],
-                        public_hash=bytes.fromhex(ti['public_hash']), address=ti['address'],
+                        public_hash=bytes.fromhex(ti['public_hash']), address=address,
                         witness_type=ti['witness_type'], locktime_cltv=ti['locktime_cltv'],
                         locktime_csv=ti['locktime_csv'], signatures=ti['signatures'], compressed=ti['compressed'],
-                        encoding=ti['encoding'], unlocking_script_unsigned=ti['script_code'],
-                        sigs_required=ti['sigs_required'], sequence=ti['sequence'],
+                        locking_script=ti['locking_script'], sigs_required=ti['sigs_required'], sequence=ti['sequence'],
                         witnesses=[bytes.fromhex(w) for w in ti['witnesses']], script_type=ti['script_type'],
-                        strict=False)
+                        strict=self.strict)
         for to in tx['outputs']:
-            t.add_output(value=to['value'], address=to['address'], public_hash=to['public_hash'],
-                         lock_script=to['script'], spent=to['spent'], strict=False)
+            address = to['address'] if not self.network_overrides else (
+                Address.parse(to['address'], network_overrides=self.network_overrides).address)
+            t.add_output(value=to['value'], address=address, public_hash=to['public_hash'],
+                         lock_script=to['script'], spent=to['spent'], strict=self.strict)
         t.update_totals()
         return t
 
-    def gettransaction(self, txid):
+    def gettransaction(self, txid, block_count=None):
         tx = self.compose_request('transaction', txid)
-        return self._parse_transaction(tx)
+        return self._parse_transaction(tx, block_count)
 
     def gettransactions(self, address, after_txid='', limit=MAX_TRANSACTIONS):
         prtxs = []
@@ -165,13 +168,13 @@ class BlocksmurferClient(BaseClient):
 
         txs = []
         if parse_transactions and bd['transactions'] and isinstance(bd['transactions'][0], dict):
-            block_count = self.blockcount()
+            self.latest_block = self.blockcount() if not self.latest_block else self.latest_block
             for tx in bd['transactions']:
                 tx['confirmations'] = bd['depth']
                 tx['time'] = bd['time']
                 tx['block_height'] = bd['height']
                 tx['block_hash'] = bd['block_hash']
-                t = self._parse_transaction(tx, block_count)
+                t = self._parse_transaction(tx, self.latest_block)
                 if t.txid != tx['txid']:
                     raise ClientError("Could not parse tx %s. Different txid's" % (tx['txid']))
                 txs.append(t)
@@ -196,7 +199,9 @@ class BlocksmurferClient(BaseClient):
         }
         return block
 
-    # def getrawblock(self, blockid):
+    def getrawblock(self, blockid):
+        res = self.compose_request('rawblock', blockid)
+        return res
 
     def isspent(self, txid, output_n):
         res = self.compose_request('isspent', txid, str(output_n))

@@ -6,17 +6,14 @@
 Welcome to Bitcoinlib's documentation!
 ======================================
 
-Bitcoin and other Crypto Currency Library for Python.
+The Python BitcoinLib is a library that provides developers with a wide range of tools to work with Bitcoin.
 
-Includes a fully functional wallet, with multi signature, multi currency and multiple accounts. Use this
-library to create and manage transactions, addresses/keys, wallets, mnemonic password phrases and blocks with
-simple and straightforward Python code.
+This library is flexible and modular: you can use specific modules without loading the entire library.
 
-You can use this library at a high level and create and manage wallets on the command line or at a low level
-and create your own custom made transactions, scripts, keys or wallets.
+Below you can find some basic examples, link to some manuals and an overview of modules and classes.
 
-The BitcoinLib connects to various service providers automatically to update wallets, transactions and
-blockchain information.
+For questions, issues, ideas please check `Github Discussions
+<https://github.com/1200wd/bitcoinlib/discussions>`_ or the Github issues page.
 
 
 Wallet
@@ -30,10 +27,10 @@ Example: Create wallet and generate new address (key) to receive bitcoins
 .. code-block:: pycon
 
    >>> from bitcoinlib.wallets import Wallet
-   >>> w = Wallet.create('Wallet1')
+   >>> w = Wallet.create('MyWallet')
    >>> key1 = w.get_key()
    >>> key1.address
-   '1Fo7STj6LdRhUuD1AiEsHpH65pXzraGJ9j'
+   'bc1q037g9zlyjzyznqhhqjqhd94s7tsphl0yczlpcs'
 
 Now send a small transaction to your wallet and use the scan() method to update transactions and UTXO's
 
@@ -47,35 +44,10 @@ If successful a transaction ID is returned
 
 .. code-block:: pycon
 
-    >>> t = w.send_to('1PWXhWvUH3bcDWn6Fdq3xhMRPfxRXTjAi1', '0.001 BTC')
+    >>> t = w.send_to('bc1q9fvq0dq8ku3ygjmjxx06x80mzafe4z5gzdah95', '0.001 BTC')
     'b7feea5e7c79d4f6f343b5ca28fa2a1fcacfe9a2b7f44f3d2fd8d6c2d82c4078'
     >>> t.info()  # Shows transaction information and send results
 
-
-
-Segregated Witness Wallet
--------------------------
-
-Easily create and manage Segwit wallets. Both native Segwit with base32/bech32 addresses and P2SH nested Segwit
-wallets with traditional addresses are available.
-
-Create a native single key P2WPKH wallet:
-
-.. code-block:: pycon
-
-    >>> from bitcoinlib.wallets import Wallet
-    >>> w = Wallet.create('segwit_p2wpkh', witness_type='segwit')
-    >>> w.get_key().address
-    bc1q84y2quplejutvu0h4gw9hy59fppu3thg0u2xz3
-
-Or create a P2SH nested single key P2SH_P2WPKH wallet:
-
-.. code-block:: pycon
-
-    >>> from bitcoinlib.wallets import Wallet
-    >>> w = Wallet.create('segwit_p2sh_p2wpkh', witness_type='p2sh-segwit')
-    >>> w.get_key().address
-    36ESSWgR4WxXJSc4ysDSJvecyY6FJkhUbp
 
 
 Wallet from passphrase with accounts and multiple currencies
@@ -140,6 +112,25 @@ And then import the transaction in the second wallet, sign it and push it to the
     t2.info()
 
 
+Sign a message with a Bitcoin wallet
+------------------------------------
+
+Create a signed message with a Bitcoinlib wallet. After signing you can verify it with another wallet or an
+online service, to prove you are the owner of the private key
+
+.. code-block:: pycon
+
+    >>> message = "This is a signed message as proof I own this wallet and private key. Alice"
+    >>> w = wallet_create_or_open('message-signing-wallet')
+    >>> sig = w.sign_message(message)
+    >>> sig.as_signed_message(message)
+    -----BEGIN BITCOIN SIGNED MESSAGE-----
+    This is a example of a signed message by a Bitcoinlib wallet
+    -----BEGIN SIGNATURE-----
+    bc1q065ed8cnxf9rr2v0qhatr2guruulr0jpgjycfu
+    J4YKfaKqHDJCidfWXYTRC191QYZ3slu8VzgFyUb6m7QJn7Yn2sif7Od1slvnhBV6pLqj2cnISyahVCIrrHQNe0I=
+    -----END BITCOIN SIGNED MESSAGE-----
+
 Command Line Tool
 -----------------
 
@@ -149,16 +140,39 @@ To create a new Bitcoin wallet
 
 .. code-block:: bash
 
-    $ clw newwallet
-    Command Line Wallet for BitcoinLib
+   $ python bitcoinlib/tools/clw.py new -w newwallet
+   Command Line Wallet - BitcoinLib 0.6.29
 
-    Wallet newwallet does not exist, create new wallet [yN]? y
+   CREATE wallet 'newwallet' (bitcoin network)
+   Passphrase: sibling undo gift cat garage survey taxi index admit odor surface waste
+   Please write down on paper and backup. With this key you can restore your wallet and all keys
 
-    CREATE wallet 'newwallet' (bitcoin network)
+   Type 'yes' if you understood and wrote down your key: yes
+   Wallet info for newwallet
+   === WALLET ===
+    ID                             21
+    Name                           newwallet
+    Owner
+    Scheme                         bip32
+    Multisig                       False
+    Witness type                   segwit
+    Main network                   bitcoin
+    Latest update                  None
 
-    Your mnemonic private key sentence is: force humble chair kiss season ready elbow cool awake divorce famous tunnel
+   = Wallet Master Key =
+    ID                             177
+    Private                        True
+    Depth                          0
 
-    Please write down on paper and backup. With this key you can restore your wallet and all keys
+   - NETWORK: bitcoin -
+   - - Keys
+     182 m/84`/0`/0`/0/0              bc1qza24j7snqlmx7603z8qplm4rzfkr0p0mneraqv    address index 0                        0.00000000 ₿
+
+   - - Transactions Account 0 (0)
+
+   = Balance Totals (includes unconfirmed) =
+
+
 
 You can use the command line wallet 'clw' to create simple or multisig wallets for various networks,
 manage public and private keys and managing transactions.
@@ -171,7 +185,7 @@ http://bitcoinlib.readthedocs.io/en/latest/_static/manuals.command-line-wallet.h
 Service providers
 -----------------
 
-Communicates with pools of bitcoin service providers to retreive transaction, address, blockchain information.
+Communicates with pools of bitcoin service providers to retrieve transaction, address, blockchain information.
 To push a transaction to the network. To determine optimal service fee for a transaction. Or to update your
 wallet's balance.
 
@@ -203,12 +217,23 @@ For more examples see https://github.com/1200wd/bitcoinlib/tree/master/examples
 
    Installation and Settings <source/_static/manuals.install>
    source/_static/manuals.command-line-wallet
-   Add Service Provider <source/_static/manuals.add-provider>
-   Bitcoind Node <source/_static/manuals.setup-bitcoind-connection>
    Databases <source/_static/manuals.databases>
    Encrypted Database <source/_static/manuals.sqlcipher>
    Security & Privacy <source/_static/manuals.security>
    source/_static/manuals.caching
+   FAQ <source/_static/manuals.faq>
+
+
+.. toctree::
+   :caption: Providers
+   :maxdepth: 4
+
+   How to use Service Providers? <source/_static/service-providers>
+   Bitcoind Node <source/_static/manuals.setup-bitcoind-connection>
+   Blockbook <source/_static/manuals.setup-blockbook>
+   ElectrumX <source/_static/manuals.setup-electrumx>
+   Bcoin Node <source/_static/manuals.setup-bcoin>
+   Add Service Provider <source/_static/manuals.add-provider>
 
 
 .. toctree::

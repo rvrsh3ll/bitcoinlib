@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    litecoinblockexplorer.net Client
-#    © 2019 August - 1200 Web Development <http://1200wd.com/>
+#    © 2019-2026 June - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -19,7 +19,7 @@
 #
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from bitcoinlib.main import MAX_TRANSACTIONS
 from bitcoinlib.services.baseclient import BaseClient
 from bitcoinlib.transactions import Transaction
@@ -49,39 +49,28 @@ class LitecoinBlockexplorerClient(BaseClient):
             status = 'confirmed'
         else:
             status = 'unconfirmed'
-        fees = None if 'fees' not in tx else int(round(float(tx['fees']) * self.units, 0))
-        value_in = 0 if 'valueIn' not in tx else tx['valueIn']
-        isCoinbase = False
-        if 'isCoinBase' in tx and tx['isCoinBase']:
-            isCoinbase = True
+        fees = None if 'fees' not in tx else round(float(tx['fees']) * self.units)
+        value_in = 0 if 'valueIn' not in tx else round(float(tx['valueIn']) * self.units)
         txdate = None
         if 'blocktime' in tx:
-            txdate = datetime.utcfromtimestamp(tx['blocktime'])
-        t = Transaction(locktime=tx.get('locktime'), version=tx['version'], network=self.network, fee=fees,
-                        txid=tx['txid'], date=txdate,
-                        confirmations=tx['confirmations'], block_height=tx['blockheight'], status=status,
-                        input_total=int(round(float(value_in) * self.units, 0)), coinbase=isCoinbase,
-                        output_total=int(round(float(tx['valueOut']) * self.units, 0)), size=len(tx['hex']) // 2)
-        for ti in tx['vin']:
-            if isCoinbase:
-                t.add_input(prev_txid=32 * b'\0', output_n=4*b'\xff', unlocking_script=ti['coinbase'], index_n=ti['n'],
-                            script_type='coinbase', sequence=ti['sequence'], value=0)
-            else:
-                value = int(round(float(ti['value']) * self.units, 0))
-                us = '' if 'hex' not in ti['scriptSig'] else ti['scriptSig']['hex']
-                t.add_input(prev_txid=ti['txid'], output_n=ti['vout'], unlocking_script=us,
-                            index_n=ti['n'], value=value, sequence=ti['sequence'],
-                            double_spend=False if ti.get('doubleSpentTxID') is None else ti['doubleSpentTxID'],
-                            strict=False)
-        for to in tx['vout']:
-            value = int(round(float(to['value']) * self.units, 0))
-            # t.add_output(value=value, lock_script=to['scriptPubKey']['hex'],
-            #              spent=True if to['spentTxId'] else False, output_n=to['n'],
-            #              spending_txid=None if not to['spentTxId'] else to['spentTxId'],
-            #              spending_index_n=None if not to['spentIndex'] else to['spentIndex'])
-            # FIXME: Found many wrong spending results
-            t.add_output(value=value, lock_script=to['scriptPubKey']['hex'],
-                         spent=None, output_n=to['n'], strict=False)
+            txdate = datetime.fromtimestamp(tx['blocktime'], timezone.utc)
+        t = Transaction.parse_hex(tx['hex'], strict=self.strict, network=self.network)
+        t.fee = fees
+        t.input_total = value_in
+        t.output_total = round(float(tx['valueOut']) * self.units)
+        t.fees = round(float(tx['fees']) * self.units)
+        t.date = txdate
+        t.confirmations = tx['confirmations']
+        t.block_height = tx['blockheight']
+        if t.confirmations == 0:
+            t.block_height = None
+            t.date = None
+        t.block_hash = tx.get('blockhash', '')
+        t.status = status
+        for n, ti in enumerate(tx['vin']):
+            t.inputs[n].value = round(float(ti['value'] or 0) * self.units)
+        for i, to in enumerate(tx['vout']):
+            t.outputs[i].spent = to['spent']
         return t
 
     def getbalance(self, addresslist):
@@ -89,7 +78,7 @@ class LitecoinBlockexplorerClient(BaseClient):
         addresslist = self._addresslist_convert(addresslist)
         for a in addresslist:
             res = self.compose_request('address', a.address)
-            balance += int(float(res['balance']) / self.network.denominator)
+            balance += round(float(res['balance']) / self.network.denominator)
         return balance
 
     def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
@@ -109,13 +98,13 @@ class LitecoinBlockexplorerClient(BaseClient):
                 'fee': None,
                 'size': 0,
                 'value': tx['satoshis'],
-                'script': tx['scriptPubKey'],
+                'script': tx.get('scriptPubKey', ''),
                 'date': None
             })
         return txs[::-1][:limit]
 
-    def gettransaction(self, tx_id):
-        tx = self.compose_request('tx', tx_id)
+    def gettransaction(self, txid):
+        tx = self.compose_request('tx', txid)
         return self._convert_to_transaction(tx)
 
     # FIXME: Not available anymore
@@ -132,20 +121,20 @@ class LitecoinBlockexplorerClient(BaseClient):
     #         txs.append(self._convert_to_transaction(tx))
     #     return txs
 
-    def getrawtransaction(self, tx_id):
-        res = self.compose_request('tx', tx_id)
+    def getrawtransaction(self, txid):
+        res = self.compose_request('tx', txid)
         return res['hex']
 
     def sendrawtransaction(self, rawtx):
-        res = self.compose_request('sendtx', data={'hex': rawtx}, method='post')
+        res = self.compose_request('sendtx', data=rawtx)
         return {
-            'txid': res['txid'],
+            'txid': res['result'],
             'response_dict': res
         }
 
     def estimatefee(self, blocks):
-        res = self.compose_request('estimatefee', str(blocks))
-        return int(float(res['result']) / self.network.denominator)
+        res = self.compose_request('estimatefee', str(int(blocks)+1))
+        return round(float(res['result']) / self.network.denominator)
 
     def blockcount(self):
         res = self.compose_request('status', '', variables={'q': 'getinfo'})
@@ -161,44 +150,41 @@ class LitecoinBlockexplorerClient(BaseClient):
         bd = self.compose_request('block', str(blockid))
         if parse_transactions:
             txs = []
-            for tx in bd['tx'][(page-1)*limit:page*limit]:
-                # try:
-                txs.append(self.gettransaction(tx['id']))
-                # except Exception as e:
-                #     _logger.error("Could not parse tx %s with error %s" % (tx['id'], e))
+            for tx in bd['txs'][(page-1)*limit:page*limit]:
+                txs.append(self.gettransaction(tx['txid']))
         else:
-            txs = [tx['id'] for tx in bd['tx']]
+            txs = [tx['txid'] for tx in bd['txs']]
 
         block = {
-            'bits': bd['bits'],
+            'bits': int(bd['bits'], 16),
             'depth': bd['confirmations'],
             'block_hash': bd['hash'],
             'height': bd['height'],
-            'merkle_root': bd['merkleroot'],
-            'nonce': bd['nonce'],
-            'prev_block': bd['previousblockhash'],
+            'merkle_root': bd['merkleRoot'],
+            'nonce': int(bd['nonce']),
+            'prev_block': bd['previousBlockHash'],
             'time': bd['time'],
-            'tx_count': len(bd['tx']),
+            'tx_count': bd['txCount'],
             'txs': txs,
             'version': bd['version'],
             'page': page,
-            'pages': None if not limit else int(len(bd['tx']) // limit) + (len(bd['tx']) % limit > 0),
+            'pages': None if not limit else int(len(bd['txs']) // limit) + (len(bd['txs']) % limit > 0),
             'limit': limit
         }
         return block
 
     # def getrawblock(self, blockid):
 
-    # def isspent(self, txid, output_n):
-    #     t = self.gettransaction(txid)
-    #     return 1 if t.outputs[output_n].spent else 0
+    def isspent(self, txid, output_n):
+        t = self.gettransaction(txid)
+        return 1 if t.outputs[output_n].spent else 0
 
     def getinfo(self):
-        info = self.compose_request('status', '')['info']
+        info = self.compose_request('status', '')
         return {
-            'blockcount': info['blocks'],
-            'chain': info['network'],
-            'difficulty': int(float(info['difficulty'])),
+            'blockcount': info['backend']['blocks'],
+            'chain': info['backend']['chain'],
+            'difficulty': round(float(info['backend']['difficulty'])),
             'hashrate': 0,
-            'mempool_size': 0,
+            'mempool_size': info['blockbook']['mempoolSize'],
         }

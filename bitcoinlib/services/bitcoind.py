@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Client for bitcoind deamon
-#    © 2017 - 2020 Oct - 1200 Web Development <http://1200wd.com/>
+#    © 2017 - 2024 May - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -53,9 +53,12 @@ class BitcoindClient(BaseClient):
     """
 
     @staticmethod
-    def from_config(configfile=None, network='bitcoin'):
+    @deprecated
+    def from_config(configfile=None, network='bitcoin', **kwargs):
         """
         Read settings from bitcoind config file
+
+        Obsolete: does not work anymore, passwords are not stored in bitcoin config, only hashed password.
 
         :param configfile: Path to config file. Leave empty to look in default places
         :type: str
@@ -84,6 +87,7 @@ class BitcoindClient(BaseClient):
                     break
         else:
             cfn = Path(BCL_DATA_DIR, 'config', configfile)
+
         if not cfn or not cfn.is_file():
             raise ConfigError("Config file %s not found. Please install bitcoin client and specify a path to config "
                               "file if path is not default. Or place a config file in .bitcoinlib/bitcoin.conf to "
@@ -112,69 +116,75 @@ class BitcoindClient(BaseClient):
         server = _read_from_config(config, 'rpc', 'externalip', server)
 
         url = "http://%s:%s@%s:%s" % (config.get('rpc', 'rpcuser'), config.get('rpc', 'rpcpassword'), server, port)
-        return BitcoindClient(network, url)
+        return BitcoindClient(network, url, **kwargs)
 
     def __init__(self, network='bitcoin', base_url='', denominator=100000000, *args):
         """
         Open connection to bitcoin node
 
-        :param network: Bitcoin mainnet or testnet. Default is bitcoin mainnet
-        :type: str
         :param base_url: Connection URL in format http(s)://user:password@host:port.
         :type: str
-        :param denominator: Denominator for this currency. Should be always 100000000 (satoshis) for bitcoin
+        :param network: Bitcoin mainnet or testnet. Default is bitcoin mainnet
+        :type: str
+        :param denominator: Denominator for this currency. Should be always 100000000 (Satoshi's) for bitcoin
+        :type: str
+        :param wallet_name: Name of Bitcoin core wallet to use. Make sure the wallet exists, otherwise connection will fail.
         :type: str
         """
         if isinstance(network, Network):
             network = network.name
         if not base_url:
-            bdc = self.from_config('', network)
-            base_url = bdc.base_url
-            network = bdc.network
-        if len(base_url.split(':')) != 4:
-            raise ConfigError("Bitcoind connection URL must be of format 'http(s)://user:password@host:port,"
-                              "current format is %s. Please set url in providers.json file or check bitcoin config "
-                              "file" % base_url)
-        if 'password' in base_url:
-            raise ConfigError("Invalid password in bitcoind provider settings. "
-                              "Please replace default password and set url in providers.json or bitcoin.conf file")
+            raise ValueError("Please provide rpc connection url to bitcoind node")
+        wallet_name = '' if not len(args) > 6 else args[6]
+        if wallet_name:
+            base_url = base_url.replace("{wallet_name}", wallet_name)
         _logger.info("Connect to bitcoind")
         self.proxy = AuthServiceProxy(base_url)
         super(self.__class__, self).__init__(network, PROVIDERNAME, base_url, denominator, *args)
 
-    # def getbalance
+    def getbalance(self, addresslist):
+        balance = 0
+        for address in addresslist:
+            res = self.proxy.getaddressinfo(address)
+            if not (res['ismine'] or res['iswatchonly']):
+                raise ClientError(
+                    "Address %s not found in bitcoind wallet, use 'importpubkey' or 'importaddress' to add "
+                    "address to wallet." % address)
+            txs_list = self.proxy.listunspent(0, 99999999, [address])
+            for tx in txs_list:
+                balance += round(tx['amount'] * self.units)
+        return balance
 
-    # Missing block_height, input_n, date so not usable
-    # def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
-    #     txs = []
-    #
-    #     res = self.proxy.getaddressinfo(address)
-    #     if not (res['ismine'] or res['iswatchonly']):
-    #         raise ClientError("Address %s not found in bitcoind wallet, use 'importpubkey' or 'importaddress' to add "
-    #                           "address to wallet." % address)
-    #
-    #     txs_list = self.proxy.listunspent(0, 99999999, [address])
-    #     for t in sorted(txs_list, key=lambda x: x['confirmations'], reverse=True):
-    #         txs.append({
-    #             'address': t['address'],
-    #             'txid': t['txid'],
-    #             'confirmations': t['confirmations'],
-    #             'output_n': t['vout'],
-    #             'input_n': -1,
-    #             'block_height': None,
-    #             'fee': None,
-    #             'size': 0,
-    #             'value': int(t['amount'] * self.units),
-    #             'script': t['scriptPubKey'],
-    #             'date': None,
-    #         })
-    #         if t['txid'] == after_txid:
-    #             txs = []
-    #
-    #     return txs
+    def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
+        utxos = []
+        res = self.proxy.getaddressinfo(address)
+        if not (res['ismine'] or res['iswatchonly']):
+            raise ClientError("Address %s not found in bitcoind wallet, use 'importpubkey' or 'importaddress' to add "
+                              "address to wallet." % address)
+
+        txs_list = self.proxy.listunspent(0, 9999999, [address])
+        blockcount = self.blockcount()
+        for tx in sorted(txs_list, key=lambda x: x['confirmations'], reverse=True):
+            utxos.append({
+                'address': tx['address'],
+                'txid': tx['txid'],
+                'confirmations': tx['confirmations'],
+                'output_n': tx['vout'],
+                'input_n': -1,
+                'block_height': blockcount - tx['confirmations'] + 1,
+                'fee': None,
+                'size': 0,
+                'value': round(tx['amount'] * self.units),
+                'script': tx['scriptPubKey'],
+                'date': None,
+            })
+            if tx['txid'] == after_txid:
+                utxos = []
+
+        return utxos
 
     def _parse_transaction(self, tx, block_height=None, get_input_values=True):
-        t = Transaction.parse_hex(tx['hex'], strict=False, network=self.network)
+        t = Transaction.parse_hex(tx['hex'], strict=self.strict, network=self.network)
         t.confirmations = tx.get('confirmations')
         t.block_hash = tx.get('blockhash')
         t.status = 'unconfirmed'
@@ -184,7 +194,15 @@ class BitcoindClient(BaseClient):
                 continue
             if get_input_values:
                 txi = self.proxy.getrawtransaction(i.prev_txid.hex(), 1)
-                i.value = int(round(float(txi['vout'][i.output_n_int]['value']) / self.network.denominator))
+                i.value = round(float(txi['vout'][i.output_n_int]['value']) / self.network.denominator)
+        # This doesn't seem to save any time:
+        # if get_input_values:
+        #     batchreq = []
+        #     for i in t.inputs:
+        #         batchreq.append(['getrawtransaction', i.prev_txid.hex(), 1])
+        #     res = self.proxy.batch_(batchreq)
+        #     for n, txi in enumerate(res):
+        #         t.inputs[n].value = round(float(txi['vout'][t.inputs[n].output_n_int]['value']) / self.network.denominator)
         for o in t.outputs:
             o.spent = None
 
@@ -200,15 +218,33 @@ class BitcoindClient(BaseClient):
             t.verified = True
         t.version = tx['version'].to_bytes(4, 'big')
         t.version_int = tx['version']
-        t.date = None if 'time' not in tx else datetime.utcfromtimestamp(tx['time'])
+        t.date = None if 'time' not in tx else datetime.fromtimestamp(tx['time'], timezone.utc)
         t.update_totals()
         return t
 
     def gettransaction(self, txid):
-        tx = self.proxy.getrawtransaction(txid, 1)
-        return self._parse_transaction(tx)
+        tx_raw = self.proxy.getrawtransaction(txid, 1)
+        return self._parse_transaction(tx_raw)
 
-    # def gettransactions
+    def gettransactions(self, address, after_txid='', limit=MAX_TRANSACTIONS):
+        MAX_WALLET_TRANSACTIONS = 1000
+        txs = []
+        res = self.proxy.getaddressinfo(address)
+        if not (res['ismine'] or res['iswatchonly']):
+            raise ClientError("Address %s not found in bitcoind wallet, use 'importpubkey' or 'importaddress' to add "
+                              "address to wallet." % address)
+        txs_list = self.proxy.listtransactions("*", MAX_WALLET_TRANSACTIONS, 0, True)
+        if len(txs_list) >= MAX_WALLET_TRANSACTIONS:
+            raise ClientError("Bitcoind wallet contains too many transactions %d, use other service provider for this "
+                              "wallet" % MAX_WALLET_TRANSACTIONS)
+        txids = list(set([(tx['txid'], tx.get('blockheight')) for tx in txs_list if tx['address'] == address]))
+        for (txid, blockheight) in txids:
+            tx_raw = self.proxy.getrawtransaction(txid, 1)
+            t = self._parse_transaction(tx_raw, blockheight)
+            txs.append(t)
+            if txid == after_txid:
+                txs = []
+        return txs
 
     def getrawtransaction(self, txid):
         res = self.proxy.getrawtransaction(txid)
@@ -229,10 +265,14 @@ class BitcoindClient(BaseClient):
         except KeyError as e:
             _logger.info("bitcoind error: %s, %s" % (e, pres))
             res = self.proxy.estimatefee(blocks)
-        return int(res * self.units)
+        return round(res * self.units)
 
     def blockcount(self):
-        return self.proxy.getblockcount()
+        bcinfo = self.proxy.getblockchaininfo()
+        if bcinfo['headers'] - bcinfo['blocks'] > 2:
+            raise ClientError("Node not fully synced! Currently %d blocks synced and %d blocks known" %
+                              (bcinfo['blocks'], bcinfo['headers']))
+        return bcinfo['blocks']
 
     def mempool(self, txid=''):
         txids = self.proxy.getrawmempool()
@@ -252,13 +292,9 @@ class BitcoindClient(BaseClient):
         if parse_transactions:
             bd = self.proxy.getblock(blockid, 2)
             for tx in bd['tx'][(page - 1) * limit:page * limit]:
-                # try:
                 tx['time'] = bd['time']
                 tx['blockhash'] = bd['hash']
                 txs.append(self._parse_transaction(tx, block_height=bd['height'], get_input_values=True))
-                # except Exception as e:
-                #     _logger.error("Could not parse tx %s with error %s" % (tx['txid'], e))
-            # txs += [tx['hash'] for tx in bd['tx'][len(txs):]]
         else:
             bd = self.proxy.getblock(blockid, 1)
             txs = bd['tx']
@@ -288,9 +324,7 @@ class BitcoindClient(BaseClient):
 
     def isspent(self, txid, index):
         res = self.proxy.gettxout(txid, index)
-        if not res:
-            return True
-        return False
+        return 0 if res else 1
 
     def getinfo(self):
         info = self.proxy.getmininginfo()
@@ -310,12 +344,9 @@ if __name__ == '__main__':
 
     from pprint import pprint
 
-    # 1. Connect by specifying connection URL
-    # base_url = 'http://bitcoinrpc:passwd@host:8332'
-    # bdc = BitcoindClient(base_url=base_url)
-
-    # 2. Or connect using default settings or settings from config file
-    bdc = BitcoindClient()
+    # Connect by specifying connection URL
+    base_url = 'http://bitcoinrpc:passwd@host:8332'
+    bdc = BitcoindClient(base_url=base_url)
 
     print("\n=== SERVERINFO ===")
     pprint(bdc.proxy.getnetworkinfo())

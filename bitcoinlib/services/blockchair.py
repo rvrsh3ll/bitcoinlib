@@ -18,7 +18,6 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import math
 import logging
 from datetime import datetime
 try:
@@ -66,7 +65,7 @@ class BlockChairClient(BaseClient):
         balance = 0
         for address in addresslist:
             res = self.compose_request('dashboards/address/', data=address)
-            balance += int(res['data'][address]['address']['balance'])
+            balance += round(res['data'][address]['address']['balance'])
         return balance
 
     def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
@@ -94,7 +93,7 @@ class BlockChairClient(BaseClient):
                     'size': 0,
                     'value': utxo['value'],
                     'script': utxo['script_hex'],
-                    'date': datetime.strptime(utxo['time'], "%Y-%m-%d %H:%M:%S")
+                    'date': datetime.strptime(utxo['time'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 })
             if not len(res['data']) or len(res['data']) < REQUEST_LIMIT:
                 break
@@ -115,7 +114,7 @@ class BlockChairClient(BaseClient):
         input_total = tx['input_total']
         t = Transaction(locktime=tx['lock_time'], version=tx['version'], network=self.network,
                         fee=tx['fee'], size=tx['size'], txid=tx['hash'],
-                        date=None if not confirmations else datetime.strptime(tx['time'], "%Y-%m-%d %H:%M:%S"),
+                        date=None if not confirmations else datetime.strptime(tx['time'], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc),
                         confirmations=confirmations, block_height=tx['block_id'] if tx['block_id'] > 0 else None,
                         status=status, input_total=input_total, coinbase=tx['is_coinbase'],
                         output_total=tx['output_total'], witness_type=witness_type)
@@ -136,12 +135,12 @@ class BlockChairClient(BaseClient):
                 t.add_input(prev_txid=ti['transaction_hash'], output_n=ti['index'],
                             unlocking_script=ti['spending_signature_hex'],
                             witnesses=witnesses, index_n=index_n, value=ti['value'],
-                            address=address, witness_type=witness_type, sequence=ti['spending_sequence'], strict=False)
+                            address=address, witness_type=witness_type, sequence=ti['spending_sequence'], strict=self.strict)
             else:
                 t.add_input(prev_txid=ti['transaction_hash'], output_n=ti['index'],
                             unlocking_script=ti['spending_signature_hex'], index_n=index_n, value=ti['value'],
-                            address=ti['recipient'], unlocking_script_unsigned=ti['script_hex'],
-                            sequence=ti['spending_sequence'], strict=False)
+                            address=ti['recipient'], locking_script=ti['script_hex'],
+                            sequence=ti['spending_sequence'], strict=self.strict)
             index_n += 1
         for to in res['data'][tx_id]['outputs']:
             try:
@@ -151,7 +150,7 @@ class BlockChairClient(BaseClient):
                 addr = ''
             t.add_output(value=to['value'], address=addr, lock_script=to['script_hex'],
                          spent=to['is_spent'], output_n=to['index'], spending_txid=to['spending_transaction_hash'],
-                         spending_index_n=to['spending_index'], strict=False)
+                         spending_index_n=to['spending_index'], strict=self.strict)
         return t
 
     def gettransactions(self, address, after_txid='', limit=MAX_TRANSACTIONS):
@@ -248,7 +247,7 @@ class BlockChairClient(BaseClient):
         return {
             'blockcount': info['best_block_height'],
             'chain': '',
-            'difficulty': int(float(info['difficulty'])),
+            'difficulty': round(float(info['difficulty'])),
             'hashrate': int(info['hashrate_24h']),
             'mempool_size': int(info['mempool_transactions']),
         }

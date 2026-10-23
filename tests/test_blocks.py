@@ -47,6 +47,11 @@ class TestBlocks(unittest.TestCase, CustomAssertions):
         self.rb625007 = pickle.load(pickle_in)
         pickle_in.close()
 
+        filename = os.path.join(os.path.dirname(__file__), "block722010.pickle")
+        pickle_in = open(filename, "rb")
+        self.rb722010 = pickle.load(pickle_in)
+        pickle_in.close()
+
     def test_blocks_parse_genesis(self):
         raw_block = '0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3' \
                     'e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c010100000001000000000000000000' \
@@ -68,6 +73,13 @@ class TestBlocks(unittest.TestCase, CustomAssertions):
         self.assertEqual(b.tx_count, 1)
         self.assertEqual(str(b),
                          '<Block(000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f, 0, transactions: 1)>')
+        t = b.parse_transaction()
+        self.assertEqual(t.outputs[0].address, '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')
+        self.assertEqual(b.total_out, 0)
+        b.update_totals()
+        self.assertEqual(b.total_in, 0)
+        self.assertEqual(b.total_out, 5000000000)
+
 
     def test_blocks_create_block(self):
         block_hash = '00000000000023b05c9ae15577257daf17029604eba0a58824e93306e44d0c62'
@@ -145,6 +157,7 @@ class TestBlocks(unittest.TestCase, CustomAssertions):
         self.assertEqual(b.tx_count, 81)
         self.assertEqual(b.transactions[0].txid, 'dfd63430f8d14f6545117d74b20da63efd4a75c7e28f723b3dead431b88469ee')
         self.assertEqual(b.transactions[4].txid, '717bc8b42f12baf771b6719c2e3b2742925fe3912917c716abef03e35fe49020')
+        self.assertEqual(b.transactions[4].index, 4)
         self.assertEqual(len(b.transactions), 5)
         b.parse_transactions(70)
         self.assertEqual(len(b.transactions), 75)
@@ -192,3 +205,16 @@ class TestBlocks(unittest.TestCase, CustomAssertions):
         self.assertRaisesRegex(ValueError, 'Block contains incorrect number of transactions, can not serialize',
                                b.serialize)
         self.assertListEqual(b.version_bips(), ['BIP109'])
+
+    def test_block_parse_transaction_dict(self):
+        b = Block.parse_bytes(self.rb722010, parse_transactions=False, height=722010)
+        tx_dict = b.parse_transactions_dict()
+        self.assertEqual(2668, len(tx_dict))
+        self.assertEqual(0, len(b.transactions))
+        b.parse_transactions()
+        self.assertEqual(2668, len(b.transactions))
+        i = 0
+        for tx in tx_dict:
+            self.assertEqual(tx['index'], i)
+            assert(tx['txid'].hex() == b.transactions[i].txid)
+            i += 1

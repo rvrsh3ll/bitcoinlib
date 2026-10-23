@@ -4,7 +4,7 @@
 #
 #    Create Multisig 3-of-5 wallet
 #
-#    © 2017 November - 1200 Web Development <http://1200wd.com/>
+#    © 2017 - 2023 May - 1200 Web Development <http://1200wd.com/>
 #
 
 from pprint import pprint
@@ -75,7 +75,7 @@ if not wallet_exists(WALLET_NAME):
     if len(key_list) != SIGS_N:
         raise ValueError("Number of cosigners (%d) is different then expected. SIG_N=%d" % (len(key_list), SIGS_N))
     wallet3o5 = Wallet.create(WALLET_NAME, key_list, sigs_required=SIGS_REQUIRED, witness_type=WITNESS_TYPE,
-                                network=NETWORK)
+                              network=NETWORK)
     wallet3o5.new_key()
     print("\n\nA multisig wallet with 1 key has been created on this system")
 else:
@@ -88,7 +88,7 @@ utxos = wallet3o5.utxos()
 wallet3o5.info()
 
 # Creating transactions just like in a normal wallet, then send raw transaction to other cosigners. They
-# can sign the transaction with there on key and pass it on to the next signer or broadcast it to the network.
+# can sign the transaction with their own key and pass it on to the next signer or broadcast it to the network.
 # You can use bitcoinlib/tools/sign_raw.py to import and sign a raw transaction.
 
 t = None
@@ -96,7 +96,7 @@ if utxos:
     print("\nNew unspent outputs found!")
     print("Now a new transaction will be created to sweep this wallet and send bitcoins to a testnet faucet")
     send_to_address = '2NGZrVvZG92qGYqzTLjCAewvPZ7JE8S8VxE'
-    t = wallet3o5.sweep(send_to_address, min_confirms=0, offline=True)
+    t = wallet3o5.sweep(send_to_address, min_confirms=0, broadcast=False)
     print("Now send the raw transaction hex to one of the other cosigners to sign using sign_raw.py")
     print("Raw transaction: %s" % t.raw_hex())
 else:

@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Client for dogecoind daemon
-#    © 2017 - 2020 Oct - 1200 Web Development <http://1200wd.com/>
+#    © 2017-2022 Oct - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -54,7 +54,7 @@ class DogecoindClient(BaseClient):
     """
 
     @staticmethod
-    def from_config(configfile=None, network='dogecoin'):
+    def from_config(configfile=None, network='dogecoin', **kargs):
         """
         Read settings from dogecoind config file
 
@@ -113,7 +113,7 @@ class DogecoindClient(BaseClient):
         server = _read_from_config(config, 'rpc', 'externalip', server)
 
         url = "http://%s:%s@%s:%s" % (config.get('rpc', 'rpcuser'), config.get('rpc', 'rpcpassword'), server, port)
-        return DogecoindClient(network, url)
+        return DogecoindClient(network, url, **kargs)
 
     def __init__(self, network='dogecoin', base_url='', denominator=100000000, *args):
         """
@@ -156,7 +156,7 @@ class DogecoindClient(BaseClient):
                 'block_height': None,
                 'fee': None,
                 'size': 0,
-                'value': int(t['amount'] * self.units),
+                'value': round(t['amount'] * self.units),
                 'script': t['scriptPubKey'],
                 'date': None,
             })
@@ -165,7 +165,7 @@ class DogecoindClient(BaseClient):
 
     def gettransaction(self, txid, block_height=None, get_input_values=True):
         tx = self.proxy.getrawtransaction(txid, 1)
-        t = Transaction.parse_hex(tx['hex'], strict=False, network=self.network)
+        t = Transaction.parse_hex(tx['hex'], strict=self.strict, network=self.network)
         t.confirmations = tx['confirmations']
         if t.confirmations:
             t.status = 'confirmed'
@@ -177,7 +177,7 @@ class DogecoindClient(BaseClient):
                 continue
             if get_input_values:
                 txi = self.proxy.getrawtransaction(i.prev_txid.hex(), 1)
-                i.value = int(round(float(txi['vout'][i.output_n_int]['value']) / self.network.denominator))
+                i.value = round(float(txi['vout'][i.output_n_int]['value']) / self.network.denominator)
         for o in t.outputs:
             o.spent = None
         t.version = tx['version'].to_bytes(4, 'big')
@@ -204,7 +204,7 @@ class DogecoindClient(BaseClient):
         except KeyError as e:
             _logger.info("dogecoind error: %s, %s" % (e, pres))
             res = self.proxy.estimatefee(blocks)
-        return int(res * self.units)
+        return round(res * self.units)
 
     def blockcount(self):
         return self.proxy.getblockcount()
@@ -226,6 +226,10 @@ class DogecoindClient(BaseClient):
             'hashrate': int(info['networkhashps']),
             'mempool_size': int(info['pooledtx']),
         }
+
+    def isspent(self, txid, index):
+        res = self.proxy.gettxout(txid, index)
+        return 0 if res else 1
 
 
 if __name__ == '__main__':

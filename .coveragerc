@@ -1,15 +1,27 @@
 [run]
+relative_files = True
 omit =
-    *bitcoinlib/tools/*
-    *dashd.py
+    *clw.py
+    *import_database.py
+    *mnemonic_key_create.py
+    *sign_raw.py
+    *benchmark.py
+    *wallet_multisig_2of3.py
     *bitcoind.py
     *dogecoind.py
     *bcoin.py
     *litecoind.py
     *authproxy.py
     *cryptoid.py
-    *insightdash.py
+    *chainso.py
+    *litecoreio.py
     *litecoinblockexplorer.py
+    *bitflyer.py
+    *blocksmurfer.py
+    *electrumx.py
+    *blockchair.py
+    *blockbook1.py
+    *nownodes.py
 [report]
 exclude_lines =
     pragma: no cover
@@ -21,3 +33,4 @@ exclude_lines =
     if 0:
     if __name__ == .__main__.:
     if not PY3
+    except ImportError

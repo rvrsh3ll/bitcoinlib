@@ -1,5 +1,5 @@
-Install, Update and Tweak BitcoinLib
-====================================
+Install and setup BitcoinLib
+============================
 
 Installation
 ------------
@@ -16,16 +16,16 @@ Package can be found at https://pypi.org/project/bitcoinlib/
 Install from source
 ~~~~~~~~~~~~~~~~~~~
 
-Required packages:
+Required packages for Ubuntu, for other systems see below:
 
-``sudo apt install -y postgresql postgresql-contrib mysql-server libpq-dev libmysqlclient-dev``
+``apt install build-essential python3-dev libgmp3-dev pkg-config postgresql postgresql-contrib mariadb-server libpq-dev libmysqlclient-dev pkg-config``
 
 Create a virtual environment for instance on linux with virtualenv:
 
 .. code-block:: bash
 
-    $ virtualenv -p python3 venv/bitcoinlib
-    $ source venv/bitcoinlib/bin/activate
+    $ virtualenv -p ~/.virtualenvs/bitcoinlib
+    $ source ~/.virtualenvs/bitcoinlib/bin/activate
 
 Then clone the repository and install dependencies:
 
@@ -33,8 +33,13 @@ Then clone the repository and install dependencies:
 
     $ git clone https://github.com/1200wd/bitcoinlib.git
     $ cd bitcoinlib
-    $ pip install -r requirements-dev.txt
+    $ python -m pip install .
 
+You can test your local installation by running all unittests:
+
+.. code-block:: bash
+
+    $ python -m unittest
 
 
 Package dependencies
@@ -42,14 +47,10 @@ Package dependencies
 
 Required Python Packages, are automatically installed upon installing bitcoinlib:
 
-* fastecdsa
-* pyaes
-* scrypt (or much slower pyscript)
+* fastecdsa (or ecdsa on Windows)
 * sqlalchemy
 * requests
-* enum34 (for older Python installations)
-* pathlib2 (for Python 2)
-* six
+* pycryptodome
 
 
 Other requirements Linux
@@ -57,19 +58,19 @@ Other requirements Linux
 
 On Debian, Ubuntu or their derivatives:
 
-``sudo apt install build-essential python-dev python3-dev libgmp3-dev``
+``apt install build-essential python3-dev libgmp3-dev pkg-config postgresql postgresql-contrib mariadb-server libpq-dev libmysqlclient-dev pkg-config``
 
 On Fedora, CentOS or RHEL:
 
-``sudo dnf install python3-devel gmp-devel``
+``dnf install python3-devel gmp-devel``
 
-To install OpenSSL development package on Debian, Ubuntu or their derivatives
+On Alpine Linux, lightweight Linux used for Docker images:
 
-``sudo apt install libssl-dev``
+``apk add python3-dev gmp-dev py3-pip gcc musl-dev libpq-dev postgresql postgresql-contrib mariadb-dev mysql-client``
 
-To install OpenSSL development package on Fedora, CentOS or RHEL
+On Kali linux:
 
-``sudo yum install gcc openssl-devel``
+``apt install libgmp3-dev postgresql postgresql-contrib libpq-dev pkg-config default-libmysqlclient-dev default-mysql-server``
 
 
 Development environment
@@ -77,20 +78,33 @@ Development environment
 
 Install database packages for MySQL and PostgreSQL
 
-``sudo apt install mysql-server postgresql postgresql-contrib libmysqlclient-dev``
+``apt install mysql-server postgresql postgresql-contrib libmysqlclient-dev pkg-config libpq-dev``
 
 Check for the latest version of the PostgreSQL dev server:
 
-``sudo apt install postgresql-server-dev-<version>``
+``apt install postgresql-server-dev-<version>``
 
 From library root directory install the Python requirements
 
-``pip install -r requirements-dev.txt``
+``python -m pip install .[dev]``
 
 Then run the unittests to see if everything works
 
-``python setup.py test``
+``python -m unittest``
 
+
+Run without database
+~~~~~~~~~~~~~~~~~~~~
+
+If you do need the Wallet, Service or bitcoinlib tools you can use the library without database. Remove the
+sqlalchemy module from the requirements or uninstall it with:
+
+``python -m pip uninstall sqlalchemy``
+
+When you uninstall the sqlalchemy database not all unittests will run, you need to run them separately. For instance
+to run the test_keys unittest:
+
+``python -m pip unittest tests/test_keys.py``
 
 
 Other requirements Windows
@@ -104,8 +118,9 @@ The fastecdsa library is not enabled at this moment in the windows install, the 
 Installation of fastecdsa on Windows is possible but not easy, read https://github.com/AntonKueltz/fastecdsa/issues/11
 for steps you could take to install this library.
 
-If you have problems with installing this library on Windows you could try to use the pyscrypt library instead of
-scrypt. The pyscrypt library is pure Python so it doesn't need any C compilers installed. But this will run slower.
+When using Python on Windows it needs to be set to UTF-8 mode. You can do this by adding the PYTHONUTF8=1 to the
+environment variables or use the -X utf8 command line option. Please see
+https://docs.python.org/3/using/windows.html#win-utf8-mode for more information.
 
 
 Update Bitcoinlib
@@ -129,64 +144,48 @@ with new versions if you delete the .bitcoinlib/install.log file.
 
     $ rm .bitcoinlib/install.log
 
-If the new release contains database updates you have to migrate the database with the updatedb.py command.
-This program extracts keys and some wallet information from the old database and then creates a new database.
-The updatedb.py command is just a helper tool and not guaranteed to work, it might fail if there are a lot
-of database changes. So backup database / private keys first and use at your own risk!
-
-.. code-block:: none
-
-    $ python updatedb.py
-    Wallet and Key data will be copied to new database. Transaction data will NOT be copied
-    Updating database file: /home/guest/.bitcoinlib/database/bitcoinlib.sqlite
-    Old database will be backed up to /home/guest/.bitcoinlib/database/bitcoinlib.sqlite.backup-20180711-01:46
-    Type 'y' or 'Y' to continue or any other key to cancel: y
-
 
 Troubleshooting
 ---------------
 
-When you experience issues with the scrypt package when installing you can try to solve this by installing
-scrypt seperately:
-
-.. code-block:: bash
-
-    $ pip uninstall scrypt
-    $ pip install scrypt
-
-Please make sure you also have the Python development and SSL development packages installed, see 'Other requirements'
+Please make sure you have the Python development and SSL development packages installed, see 'Other requirements'
 above.
 
-You can also use pyscrypt instead of scrypt. Pyscrypt is a pure Python scrypt password-based key derivation library.
-It works but it is slow when using BIP38 password protected keys.
-
-.. code-block:: none
-
-    $ pip install pyscrypt
+You can also use pycryptodome, pyscrypt or scrypt. pyscript is a pure Python scrypt password-based key
+derivation library. It works but it is slow when using BIP38 password protected keys.
 
 If you run into issues do not hesitate to contact us or file an issue at https://github.com/1200wd/bitcoinlib/issues
 
 
-Using library in other software
--------------------------------
+Change data directory
+---------------------
 
-If you use the library in other software and want to change file locations and other settings you can specify a
-location for a config file in the BCL_CONFIG_FILE:
+The default location for Bitcoinlib settings and data is in the user's dot bitcoinlib directory.
+For Linux this would be ~/.bitcoinlib.
+You can change the location of data, settings and database by specifying the directory in the system
+environment 'BCL_DATA_DIR' variable:
 
 .. code-block:: python
 
-    os.environ['BCL_CONFIG_FILE'] = '/var/www/blocksmurfer/bitcoinlib.ini'
+    os.environ['BCL_DATA_DIR'] = '/var/www/blocksmurfer/.bitcoinlib'
+    # or a second directory in user home
+    os.environ['BCL_DATA_DIR'] = '~/.bitcoinlib2'
 
 
-Tweak BitcoinLib
-----------------
+
+Service providers and local nodes
+---------------------------------
 
 You can `Add another service Provider <manuals.add-provider.html>`_ to this library by updating settings
 and write a new service provider class.
 
-If you use this library in a production environment it is advised to run your own Bcoin, Bitcoin, Litecoin or Dash node,
-both for privacy and reliability reasons. More setup information:
-`Setup connection to bitcoin node <manuals.setup-bitcoind-connection.html>`_
+To increase reliability, speed and privacy or if you use this library in a production environment it
+is advised to run your own Bcoin or Bitcoin node.
+
+More setup information:
+
+* `Setup connection to Bcoin node <manuals.setup-bcoin.html>`_
+* `Setup connection to Bitcoin node <manuals.setup-bitcoind-connection.html>`_
 
 Some service providers require an API key to function or allow additional requests.
 You can add this key to the provider settings file in .bitcoinlib/providers.json

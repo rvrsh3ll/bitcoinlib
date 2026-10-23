@@ -1,0 +1,7 @@
+[build-system]
+requires = ["setuptools>=75.3.4", "wheel"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+debug = true

@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Cache DataBase - SqlAlchemy database definitions for caching
-#    © 2020 February - 1200 Web Development <http://1200wd.com/>
+#    © 2020 - 2024 June - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -21,32 +21,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy import Column, Integer, BigInteger, String, Boolean, ForeignKey, DateTime, Enum, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, close_all_sessions
-# try:
-#     import mysql.connector
-#     from parameterized import parameterized_class
-#     import psycopg2
-#     from psycopg2 import sql
-#     from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-# except ImportError as e:
-#     print("Could not import all modules. Error: %s" % e)
-#     # from psycopg2cffi import compat  # Use for PyPy support
-#     # compat.register()
-#     pass  # Only necessary when mysql or postgres is used
+from sqlalchemy.orm import sessionmaker, relationship, session
 from urllib.parse import urlparse
 from bitcoinlib.main import *
 
 
 _logger = logging.getLogger(__name__)
-try:
-    dbcacheurl_obj = urlparse(DEFAULT_DATABASE_CACHE)
-    if dbcacheurl_obj.netloc:
-        dbcacheurl = dbcacheurl_obj.netloc.replace(dbcacheurl_obj.password, 'xxx')
-    else:
-        dbcacheurl = dbcacheurl_obj.path
-    _logger.info("Default Cache Database %s" % dbcacheurl)
-except Exception:
-    _logger.warning("Default Cache Database: unable to parse URL")
 Base = declarative_base()
 
 
@@ -57,9 +37,9 @@ class WitnessTypeTransactions(enum.Enum):
 
 class DbCache:
     """
-    Cache Database object. Initialize database and open session when creating database object.
+    Cache Database object. Initialize the database and open a session when creating the database object.
 
-    Create new database if is doesn't exist yet
+    Create a new database if it doesn't exist yet
 
     """
     def __init__(self, db_uri=None):
@@ -71,18 +51,15 @@ class DbCache:
             return
         self.o = urlparse(db_uri)
 
-        # if self.o.scheme == 'mysql':
-        #     raise Warning("Could not connect to cache database. MySQL databases not supported at the moment, "
-        #                   "because bytes strings are not supported as primary keys")
-
         if not self.o.scheme or len(self.o.scheme) < 2:
             db_uri = 'sqlite:///%s' % db_uri
         if db_uri.startswith("sqlite://") and ALLOW_DATABASE_THREADS:
             db_uri += "&" if "?" in db_uri else "?"
             db_uri += "check_same_thread=False"
-        if self.o.scheme == 'mysql':
-            db_uri += "&" if "?" in db_uri else "?"
-            db_uri += 'binary_prefix=true'
+        if self.o.scheme == 'mysql' or self.o.scheme == 'mariadb':
+            raise NotImplementedError("MySQL does not allow indexing on LargeBinary fields, so caching is not possible")
+            # db_uri += "&" if "?" in db_uri else "?"
+            # db_uri += 'binary_prefix=true'
         self.engine = create_engine(db_uri, isolation_level='READ UNCOMMITTED')
 
         Session = sessionmaker(bind=self.engine)
@@ -94,8 +71,8 @@ class DbCache:
 
     def drop_db(self):
         self.session.commit()
-        self.session.close_all()
-        close_all_sessions()
+        self.session.close()
+        session.close_all_sessions()
         Base.metadata.drop_all(self.engine)
 
 
@@ -159,7 +136,7 @@ class DbCacheTransaction(Base):
     fee = Column(BigInteger, doc="Transaction fee")
     nodes = relationship("DbCacheTransactionNode", cascade="all,delete",
                          doc="List of all inputs and outputs as DbCacheTransactionNode objects")
-    order_n = Column(Integer, doc="Order of transaction in block")
+    index = Column(Integer, doc="Index of transaction in block")
     witness_type = Column(Enum(WitnessTypeTransactions), default=WitnessTypeTransactions.legacy,
                           doc="Transaction type enum: legacy or segwit")
 

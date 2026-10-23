@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    ENCODING - Methods for encoding and conversion
-#    © 2016 - 2020 October - 1200 Web Development <http://1200wd.com/>
+#    © 2016 - 2026 February - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -22,28 +22,34 @@ import math
 import numbers
 from copy import deepcopy
 import hashlib
-import pyaes
 import unicodedata
 from bitcoinlib.main import *
 _logger = logging.getLogger(__name__)
 
 
-SCRYPT_ERROR = None
-USING_MODULE_SCRYPT = os.getenv("USING_MODULE_SCRYPT") not in ["false", "False", "0", "FALSE"]
-try:
-    if USING_MODULE_SCRYPT is not False:
-        import scrypt
-        USING_MODULE_SCRYPT = True
-except ImportError as SCRYPT_ERROR:
-    pass
-if 'scrypt' not in sys.modules:
-    import pyscrypt as scrypt
-    USING_MODULE_SCRYPT = False
+USING_MODULE_SCRYPT = True
 
-if not USING_MODULE_SCRYPT:
-    if 'scrypt_error' not in locals():
-        SCRYPT_ERROR = 'unknown'
-    _logger.warning("Error when trying to import scrypt module %s" % SCRYPT_ERROR)
+try:
+    from Crypto.Hash import RIPEMD160
+except ImportError:
+    _logger.warning("Could not import RIPEMD160 from pycryptodome, will try to use hashlib but this could lead to errors")
+
+try:
+    from Crypto.Cipher import AES
+except ImportError:
+    _logger.warning("MISSING MODULES! Please install pycryptodome")
+    _logger.warning("The bip38_decrypt and bip38_encrypt methods need the pycryptodome library to work!")
+
+try:
+    from hashlib import scrypt
+except ImportError:
+    try:
+        from Crypto.Protocol.KDF import scrypt
+        _logger.info("Using scrypt method from pycryptodome")
+    except ImportError:
+        _logger.warning("MISSING MODULES! Please install scrypt or pycryptodome")
+        _logger.warning("The bip38_decrypt and bip38_encrypt methods need a scrypt library to work!")
+        USING_MODULE_SCRYPT = False
 
 USE_FASTECDSA = os.getenv("USE_FASTECDSA") not in ["false", "False", "0", "FALSE"]
 try:
@@ -53,9 +59,12 @@ try:
 except ImportError:
     pass
 if 'fastecdsa' not in sys.modules:
-    _logger.warning("Could not include fastecdsa library, using slower ecdsa instead. ")
+    _logger.warning("Could not include fastecdsa library, using slower ecdsa instead.")
     USE_FASTECDSA = False
-    import ecdsa
+    try:
+        import ecdsa
+    except ImportError:
+        raise ImportError("Could not include ecdsa library. Please install fastecdsa or ecdsa library.")
 
 
 class EncodingError(Exception):
@@ -112,27 +121,24 @@ def _codestring_to_array(codestring, base):
 
 def normalize_var(var, base=256):
     """
-    For Python 2 convert variable to string
-
-    For Python 3 convert to bytes
-
-    Convert decimals to integer type
+    Convert variable to normalized value:
+    - UTF-8 encoded bytes for string values
+    - Integer value for numbers
+    - Deepcopy of list for lists
 
     :param var: input variable in any format
     :type var: str, byte
     :param base: specify variable format, i.e. 10 for decimal, 16 for hex
     :type base: int
 
-    :return: Normalized var in string for Python 2, bytes for Python 3, decimal for base10
+    :return: Normalized variable
+    :rtype: bytes, int, list
     """
     try:
         if isinstance(var, str):
-            var = var.encode('ISO-8859-1')
-    except ValueError:
-        try:
             var = var.encode('utf-8')
-        except ValueError:
-            raise EncodingError("Unknown character '%s' in input format" % var)
+    except ValueError:
+        raise EncodingError("Unknown character '%s' in input format" % var)
 
     if base == 10:
         return int(var)
@@ -144,9 +150,9 @@ def normalize_var(var, base=256):
 
 def change_base(chars, base_from, base_to, min_length=0, output_even=None, output_as_list=None):
     """
-    Convert input chars from one numeric base to another. For instance from hexadecimal (base-16) to decimal (base-10)
+    Convert input chars from one numeric base to another. For instance, from hexadecimal (base-16) to decimal (base-10)
 
-    From and to numeric base can be any base. If base is not found in definitions an array of index numbers will be returned
+    From and to numeric base can be any base. If base is not found in definitions, an array of index numbers will be returned
 
     Examples:
 
@@ -172,18 +178,18 @@ def change_base(chars, base_from, base_to, min_length=0, output_even=None, outpu
 
     :param chars: Input string
     :type chars: any
-    :param base_from: Base number or name from input. For example 2 for binary, 10 for decimal and 16 for hexadecimal
-    :type base_from: int
-    :param base_to: Base number or name for output. For example 2 for binary, 10 for decimal and 16 for hexadecimal
+    :param base_from: Base number or name from input. For example, 2 for binary, 10 for decimal and 16 for hexadecimal
+    :type base_from: int, str
+    :param base_to: Base number or name for output. For example, 2 for binary, 10 for decimal and 16 for hexadecimal
     :type base_to: int
     :param min_length: Minimal output length. Required for decimal, advised for all output to avoid leading zeros conversion problems.
     :type min_length: int
-    :param output_even: Specify if output must contain a even number of characters. Sometimes handy for hex conversions.
+    :param output_even: Specify if an output must contain an even number of characters. Sometimes handy for hex conversions.
     :type output_even: bool
-    :param output_as_list: Always output as list instead of string.
+    :param output_as_list: Always output as a list instead of string.
     :type output_as_list: bool
 
-    :return str, list: Base converted input as string or list.
+    :return str, list: Base converted input as a string or list.
     """
     if base_from == 10 and not min_length:
         raise EncodingError("For a decimal input a minimum output length is required")
@@ -216,6 +222,10 @@ def change_base(chars, base_from, base_to, min_length=0, output_even=None, outpu
         return int.from_bytes(inp, 'big')
     if base_from == 10 and base_to == 256:
         return inp.to_bytes(min_length, byteorder='big')
+    if base_from == 256 and base_to == 58:
+        return base58encode(inp)
+    if base_from == 16 and base_to == 58:
+        return base58encode(bytes.fromhex(chars))
 
     if output_even is None and base_to == 16:
         output_even = True
@@ -284,19 +294,36 @@ def change_base(chars, base_from, base_to, min_length=0, output_even=None, outpu
             output = [code_str[0]] + output
 
     if not output_as_list and isinstance(output, list):
-        if len(output) == 0:
-            output = 0
-        else:
-            co = ''
-            for c in output:
-                co += chr(c)
-            output = co
+        output = 0 if not len(output) else b''.join([bytes([c]) for c in output])
     if base_to == 10:
         return int(0) or (output != '' and int(output))
-    if base_to == 256 and not output_as_list:
-        return output.encode('ISO-8859-1')
-    else:
+
+    if base_to == 256 or output_as_list:
         return output
+    else:
+        return output.decode('utf-8')
+
+
+def base58encode(inp):
+    """
+    Convert bytes to base58 encode string
+
+    :param inp: Input string
+    :type inp: bytes
+
+    :return str:
+    """
+    origlen = len(inp)
+    inp = inp.lstrip(b'\0')
+    padding_zeros = origlen - len(inp)
+    code_str = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    acc = int.from_bytes(inp, 'big')
+
+    string = ''
+    while acc:
+        acc, idx = divmod(acc, 58)
+        string = code_str[idx:idx + 1] + string
+    return '1' * padding_zeros + string
 
 
 def varbyteint_to_int(byteint):
@@ -316,17 +343,22 @@ def varbyteint_to_int(byteint):
     if not isinstance(byteint, (bytes, list)):
         raise EncodingError("Byteint must be a list or defined as bytes")
     if byteint == b'':
-        return 0
+        return 0, 0
     ni = byteint[0]
     if ni < 253:
         return ni, 1
     if ni == 253:  # integer of 2 bytes
-        size = 2
+        size, minimum = 2, 0xfd
     elif ni == 254:  # integer of 4 bytes
-        size = 4
+        size, minimum = 4, 0x10000
     else:  # integer of 8 bytes
-        size = 8
-    return int.from_bytes(byteint[1:1+size][::-1], 'big'), size + 1
+        size, minimum = 8, 0x100000000
+    if len(byteint) < size + 1:
+        raise EncodingError(f"Truncated CompactSize integer: {size + 1} bytes expected, {len(byteint)} given")
+    value = int.from_bytes(byteint[1:1+size][::-1], 'big')
+    if value < minimum:
+        raise EncodingError(f"Non-canonical CompactSize integer: {value} encoded in {size + 1} bytes")
+    return value, size + 1
 
 
 def read_varbyteint(s):
@@ -342,6 +374,25 @@ def read_varbyteint(s):
     value, size = varbyteint_to_int(s.read(9))
     s.seek(pos + size)
     return value
+
+
+def read_varbyteint_return(s):
+    """
+    Read variable length integer from BytesIO stream. Return original converted bytes (to reconstruct transaction or
+    script).
+
+    :param s: A binary stream
+    :type s: BytesIO
+
+    :return (int, bytes):
+    """
+    pos = s.tell()
+    byteint = s.read(9)
+    if not byteint:
+        return 0, b''
+    value, size = varbyteint_to_int(byteint)
+    s.seek(pos + size)
+    return value, byteint[:size]
 
 
 def int_to_varbyteint(inp):
@@ -362,19 +413,35 @@ def int_to_varbyteint(inp):
         raise EncodingError("Input must be a number type")
     if inp < 0xfd:
         return inp.to_bytes(1, 'little')
-    elif inp < 0xffff:
+    elif inp <= 0xffff:
         return b'\xfd' + inp.to_bytes(2, 'little')
-    elif inp < 0xffffffff:
+    elif inp <= 0xffffffff:
         return b'\xfe' + inp.to_bytes(4, 'little')
     else:
         return b'\xff' + inp.to_bytes(8, 'little')
 
 
+def signature_der_decode_bytes(signature):
+    """
+    Extract r and s value from DER encoded string and convert to bytes.
+
+    :param signature: DER encoded signature
+    :type signature: bytes
+
+    :return bytes: Signature bytes encoded with r and s value
+    """
+    r, s = signature_der_decode(signature)
+    return int.to_bytes(r, 32, 'big') + int.to_bytes(s, 32, 'big')
+
+
+@deprecated
 def convert_der_sig(signature, as_hex=True):
     """
     Extract content from DER encoded string: Convert DER encoded signature to signature string.
 
-    :param signature: DER signature
+    Replaced by :func:`signature_der_decode_bytes` method
+
+    :param signature: DER encoed signature
     :type signature: bytes
     :param as_hex: Output as hexstring
     :type as_hex: bool
@@ -384,24 +451,59 @@ def convert_der_sig(signature, as_hex=True):
 
     if not signature:
         return ""
-    if USE_FASTECDSA:
-        r, s = DEREncoder.decode_signature(bytes(signature))
-    else:
-        sg, junk = ecdsa.der.remove_sequence(signature)
-        if junk != b'':
-            raise EncodingError("Junk found in encoding sequence %s" % junk)
-        r, sg = ecdsa.der.remove_integer(sg)
-        s, sg = ecdsa.der.remove_integer(sg)
+    r, s = signature_der_decode(signature)
+
     sig = '%064x%064x' % (r, s)
     if as_hex:
         return sig
     else:
         return bytes.fromhex(sig)
 
+def signature_der_decode(signature):
+    """
+    Decode a DER encoded signature and extract an r and s value
 
+    The DER encoded signature must have the following format:
+        <sequence byte> <integer byte> r <integer byte> s
+
+    :param signature: DER encoded signature
+    :type signature: bytes
+
+    :return (int, int): Tuple with r and s value
+    """
+
+    def _unpack_int(sigbytes):
+        if sigbytes[0] != 0x02:
+            raise EncodingError("Expected integer marker byte (x02)")
+        vlen, vsize = varbyteint_to_int(sigbytes[1:])
+        if len(sigbytes[:vsize+vlen+1]) != 1 + vsize + vlen:
+            raise EncodingError(f"Unexpected signature integer length: {len(sigbytes)} != {1 + vsize + vlen}")
+        ivar = int.from_bytes(sigbytes[1+vsize:1+vsize+vlen], 'big')
+        return ivar, sigbytes[vsize+vlen+1:]
+
+    if signature[0] != 0x30:
+        raise EncodingError("Signature must start with a sequence byte (x30)")
+
+    siglen, size = varbyteint_to_int(signature[1:])
+    if len(signature) == siglen + 1 + size + 1:  # ignore extra sighash byte
+        signature = signature[:-1]
+    if len(signature) != siglen + 1 + size:
+        raise EncodingError(f"Unexpected signature length: {len(signature)} != {siglen + 1 + size}")
+
+    r, rest = _unpack_int(signature[1+size:])
+    s, rest2 = _unpack_int(rest)
+    if rest2 != b'':
+        raise EncodingError(f"Unexpected rest bytes at end of signature: {rest2}")
+
+    return r, s
+
+
+@deprecated
 def der_encode_sig(r, s):
     """
     Create DER encoded signature string with signature r and s value.
+
+    Replaced by the :func:`signature_der_encode` method
 
     :param r: r value of signature
     :type r: int
@@ -410,12 +512,31 @@ def der_encode_sig(r, s):
 
     :return bytes:
     """
-    if USE_FASTECDSA:
-        return DEREncoder.encode_signature(r, s)
-    else:
-        rb = ecdsa.der.encode_integer(r)
-        sb = ecdsa.der.encode_integer(s)
-        return ecdsa.der.encode_sequence(rb, sb)
+    return signature_der_encode(r, s)
+
+
+def signature_der_encode(r, s):
+    """
+    Create DER encoded signature string with signature r and s value.
+
+    A DER encoded signature has the following format:
+        <sequence byte> <integer byte> r <integer byte> s
+
+    :param r: r value of signature
+    :type r: int
+    :param s: s value of signature
+    :type s: int
+
+    :return bytes:
+    """
+    rb = int.to_bytes(r, 32,'big').lstrip(b'\x00')
+    rb = b'\x00' + rb if rb[0] & 0x80 else rb
+
+    sb = int.to_bytes(s, 32, 'big').lstrip(b'\x00')
+    sb = b'\x00' + sb if sb[0] & 0x80 else sb
+
+    sig = b'\x30' + varstr(b'\x02' + varstr(rb) + b'\x02' + varstr(sb))
+    return sig
 
 
 def addr_to_pubkeyhash(address, as_hex=False, encoding=None):
@@ -424,7 +545,7 @@ def addr_to_pubkeyhash(address, as_hex=False, encoding=None):
 
     Wrapper for the :func:`addr_base58_to_pubkeyhash` and :func:`addr_bech32_to_pubkeyhash` method
 
-    :param address: Crypto currency address in base-58 format
+    :param address: Cryptocurrency address in base-58 format
     :type address: str
     :param as_hex: Output as hexstring
     :type as_hex: bool
@@ -452,7 +573,7 @@ def addr_base58_to_pubkeyhash(address, as_hex=False):
     >>> addr_base58_to_pubkeyhash('142Zp9WZn9Fh4MV8F3H5Dv4Rbg7Ja1sPWZ', as_hex=True)
     '21342f229392d7c9ed82c932916cee6517fbc9a2'
 
-    :param address: Crypto currency address in base-58 format
+    :param address: Cryptocurrency address in base-58 format
     :type address: str, bytes
     :param as_hex: Output as hexstring
     :type as_hex: bool
@@ -483,13 +604,13 @@ def addr_bech32_to_pubkeyhash(bech, prefix=None, include_witver=False, as_hex=Fa
     >>> addr_bech32_to_pubkeyhash('bc1qy8qmc6262m68ny0ftlexs4h9paud8sgce3sf84', as_hex=True)
     '21c1bc695a56f47991e95ff26856e50f78d3c118'
 
-    Validate the bech32 string, and determine HRP and data. Only standard data size of 20 and 32 bytes are excepted
+    Validate the bech32 string and determine HRP and data. Only standard data sizes of 20 and 32 bytes are supported
 
     :param bech: Bech32 address to convert
     :type bech: str
     :param prefix: Address prefix called Human-readable part. Default is None and tries to derive prefix, for bitcoin specify 'bc' and for bitcoin testnet 'tb'
     :type prefix: str
-    :param include_witver: Include witness version in output? Default is False
+    :param include_witver: Include a witness version in output? Default is False
     :type include_witver: bool
     :param as_hex: Output public key hash as hex or bytes. Default is False
     :type as_hex: bool
@@ -504,18 +625,22 @@ def addr_bech32_to_pubkeyhash(bech, prefix=None, include_witver=False, as_hex=Fa
         raise EncodingError("Invalid bech32 string length")
     if prefix and prefix != bech[:pos]:
         raise EncodingError("Invalid bech32 address. Prefix '%s', prefix expected is '%s'" % (bech[:pos], prefix))
-    else:
-        hrp = bech[:pos]
+    hrp = bech[:pos]
     data = _codestring_to_array(bech[pos + 1:], 'bech32')
     hrp_expanded = [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
-    if not _bech32_polymod(hrp_expanded + data) == 1:
+    check = _bech32_polymod(hrp_expanded + data)
+    if not (check == 1 or check == BECH32M_CONST):
         raise EncodingError("Bech polymod check failed")
+    if data[0] == 0 and check != 1:
+        raise EncodingError("Invalid checksum (Bech32m instead of Bech32)")
+    if data[0] != 0 and check != BECH32M_CONST:
+        raise EncodingError("Invalid checksum (Bech32 instead of Bech32m)")
     data = data[:-6]
     decoded = bytes(convertbits(data[1:], 5, 8, pad=False))
     if decoded is None or len(decoded) < 2 or len(decoded) > 40:
         raise EncodingError("Invalid decoded data length, must be between 2 and 40")
     if data[0] > 16:
-        raise EncodingError("Invalid decoded data length")
+        raise EncodingError("Invalid witness version")
     if data[0] == 0 and len(decoded) not in [20, 32]:
         raise EncodingError("Invalid decoded data length, must be 20 or 32 bytes")
     prefix = b''
@@ -527,7 +652,29 @@ def addr_bech32_to_pubkeyhash(bech, prefix=None, include_witver=False, as_hex=Fa
     return prefix + decoded
 
 
-def pubkeyhash_to_addr(pubkeyhash, prefix=None, encoding='base58'):
+def addr_bech32_checksum(bech):
+    """
+    Get bech32 checksum. Returns 1 for bech32 addresses and 0x2bc830a3 for bech32m addresses.
+    More info https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
+
+    >>> addr_bech32_checksum('bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kt5nd6y')
+    734539939
+
+    :param bech: Bech32 address to convert
+    :type bech: str
+
+    :return bool: Bech32 checksum
+    """
+
+    bech = bech.lower()
+    pos = bech.rfind('1')
+    hrp = bech[:pos]
+    data = _codestring_to_array(bech[pos + 1:], 'bech32')
+    hrp_expanded = [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
+    return _bech32_polymod(hrp_expanded + data)
+
+
+def pubkeyhash_to_addr(pubkeyhash, prefix=None, encoding='base58', witver=0):
     """
     Convert public key hash to base58 encoded address
 
@@ -539,6 +686,8 @@ def pubkeyhash_to_addr(pubkeyhash, prefix=None, encoding='base58'):
     :type prefix: str, bytes
     :param encoding: Encoding of address to calculate: base58 or bech32. Default is base58
     :type encoding: str
+    :param witver: Witness version used. Currently used for Taproot addresses with witver=1. Ignored for base58 addresses
+    :type witver: int
 
     :return str: Base58 or bech32 encoded address
 
@@ -550,7 +699,7 @@ def pubkeyhash_to_addr(pubkeyhash, prefix=None, encoding='base58'):
     elif encoding == 'bech32':
         if prefix is None:
             prefix = 'bc'
-        return pubkeyhash_to_addr_bech32(pubkeyhash, prefix)
+        return pubkeyhash_to_addr_bech32(pubkeyhash, prefix, witver)
     else:
         raise EncodingError("Encoding %s not supported" % encoding)
 
@@ -571,10 +720,10 @@ def pubkeyhash_to_addr_base58(pubkeyhash, prefix=b'\x00'):
     """
     key = to_bytes(prefix) + to_bytes(pubkeyhash)
     addr256 = key + double_sha256(key)[:4]
-    return change_base(addr256, 256, 58)
+    return base58encode(addr256)
 
 
-def pubkeyhash_to_addr_bech32(pubkeyhash, prefix='bc', witver=0, separator='1'):
+def pubkeyhash_to_addr_bech32(pubkeyhash, prefix='bc', witver=0, separator='1', checksum_xor=1):
     """
     Encode public key hash as bech32 encoded (segwit) address
 
@@ -583,7 +732,7 @@ def pubkeyhash_to_addr_bech32(pubkeyhash, prefix='bc', witver=0, separator='1'):
 
     Format of address is prefix/hrp + seperator + bech32 address + checksum
 
-    For more information see BIP173 proposal at https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki
+    For more information see the BIP173 proposal at https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki
 
     :param pubkeyhash: Public key hash
     :type pubkeyhash: str, bytes
@@ -591,24 +740,37 @@ def pubkeyhash_to_addr_bech32(pubkeyhash, prefix='bc', witver=0, separator='1'):
     :type prefix: str
     :param witver: Witness version between 0 and 16
     :type witver: int
-    :param separator: Separator char between hrp and data, should always be left to '1' otherwise its not standard.
+    :param separator: Separator char between hrp and data, should always be left to '1' otherwise it's not standard.
     :type separator: str
+    :param checksum_xor: checksum 1 for bech32 v0 addresses and 0x2bc830a3 for bech32m v1+ addresses
+    :type checksum_xor: int
 
     :return str: Bech32 encoded address
     """
 
     pubkeyhash = list(to_bytes(pubkeyhash))
 
-    if len(pubkeyhash) not in [20, 32]:
-        if int(pubkeyhash[0]) != 0:
-            witver = int(pubkeyhash[0]) - 0x50
+    # To simplify and speedup: assume pubkeyhash of size 20, 32 and 40 does not contain witness version and size byte
+    if len(pubkeyhash) not in [20, 32, 40]:
+        if pubkeyhash[0] != 0:
+            witver = pubkeyhash[0] - 0x50
+        if pubkeyhash[1] != len(pubkeyhash[2:]):
+            raise EncodingError("Incorrect pubkeyhash length")
         pubkeyhash = pubkeyhash[2:]
+
+    if witver > 16:
+        raise EncodingError("Witness version must be between 0 and 16")
+
+    if checksum_xor == BECH32M_CONST and not witver:
+        witver = 1
+    elif witver > 0:
+        checksum_xor = BECH32M_CONST
 
     data = [witver] + convertbits(pubkeyhash, 8, 5)
 
     # Expand the HRP into values for checksum computation
     hrp_expanded = [ord(x) >> 5 for x in prefix] + [0] + [ord(x) & 31 for x in prefix]
-    polymod = _bech32_polymod(hrp_expanded + data + [0, 0, 0, 0, 0, 0]) ^ 1
+    polymod = _bech32_polymod(hrp_expanded + data + [0, 0, 0, 0, 0, 0]) ^ checksum_xor
     checksum = [(polymod >> 5 * (5 - i)) & 31 for i in range(6)]
 
     return prefix + separator + _array_to_codestring(data, 'bech32') + _array_to_codestring(checksum, 'bech32')
@@ -662,7 +824,7 @@ def convertbits(data, frombits, tobits, pad=True):
         if bits:
             ret.append((acc << (tobits - bits)) & maxv)
     elif bits >= frombits or ((acc << (tobits - bits)) & maxv):
-        return None
+        raise EncodingError("Invalid padding bits")
     return ret
 
 
@@ -686,7 +848,7 @@ def varstr(string):
 
 def to_bytes(string, unhexlify=True):
     """
-    Convert string, hexadecimal string  to bytes
+    Convert string, hexadecimal string to bytes
 
     :param string: String to convert
     :type string: str, bytes
@@ -713,8 +875,7 @@ def to_bytes(string, unhexlify=True):
 
 def to_hexstring(string):
     """
-    Convert bytes, string to a hexadecimal string. Use instead of built-in hex() method if format
-    of input string is not known.
+    Convert bytes, string to a hexadecimal string. Use instead of built-in hex() method if the format of the input string is not known.
 
     >>> to_hexstring(b'\\x12\\xaa\\xdd')
     '12aadd'
@@ -739,7 +900,7 @@ def to_hexstring(string):
 
 def normalize_string(string):
     """
-    Normalize a string to the default NFKD unicode format
+    Normalize a string to the default NFKD Unicode format
     See https://en.wikipedia.org/wiki/Unicode_equivalence#Normalization
 
     :param string: string value
@@ -774,6 +935,30 @@ def double_sha256(string, as_hex=False):
         return hashlib.sha256(hashlib.sha256(string).digest()).hexdigest()
 
 
+def sha256(string, as_hex=False):
+    """
+    Get SHA256 hash of string
+
+    :param string: String to be hashed
+    :type string: bytes
+    :param as_hex: Return value as hexadecimal string. Default is False
+    :type as_hex: bool
+
+    :return bytes, str:
+    """
+    if not as_hex:
+        return hashlib.sha256(string).digest()
+    else:
+        return hashlib.sha256(string).hexdigest()
+
+
+def ripemd160(string):
+    try:
+        return RIPEMD160.new(string).digest()
+    except Exception:
+        return hashlib.new('ripemd160', string).digest()
+
+
 def hash160(string):
     """
     Creates a RIPEMD-160 + SHA256 hash of the input string
@@ -783,83 +968,72 @@ def hash160(string):
 
     :return bytes: RIPEMD-160 hash of script
     """
-    return hashlib.new('ripemd160', hashlib.sha256(string).digest()).digest()
+    return ripemd160(hashlib.sha256(string).digest())
 
 
-def bip38_decrypt(encrypted_privkey, password):
+def aes_encrypt(data, key):
     """
-    BIP0038 non-ec-multiply decryption. Returns WIF private key.
-    Based on code from https://github.com/nomorecoin/python-bip38-testing
-    This method is called by Key class init function when importing BIP0038 key.
+    Encrypt data using AES Symmetric Block cipher Encryption in SIV mode (see
+    https://pycryptodome.readthedocs.io/en/latest/src/cipher/modern.html#siv-mode)
 
-    :param encrypted_privkey: Encrypted private key using WIF protected key format
-    :type encrypted_privkey: str
-    :param password: Required password for decryption
-    :type password: str
+    A nonce is not used so data is encrypted deterministic, in SIV mode this doesn't reduce security.
 
-    :return tupple (bytes, bytes): (Private Key bytes, 4 byte address hash for verification)
+    Method returns a byte string with ciphertext and a 16-byte tag. The ciphertext has the same length as the data.
+
+    Data can be decrypted with the :func:`aes_decrypt` method
+
+    :param data: Data to encrypt
+    :type data: bytes
+    :param key: The cryptographic key, size must be 32 bytes because AES-128 is used as cipher
+    :type key: bytes
+
+    :return bytes: Ciphertext and 16 bytes tag
+
     """
-    d = change_base(encrypted_privkey, 58, 256)[2:]
-    flagbyte = d[0:1]
-    d = d[1:]
-    if flagbyte == b'\xc0':
-        compressed = False
-    elif flagbyte == b'\xe0':
-        compressed = True
-    else:
-        raise EncodingError("Unrecognised password protected key format. Flagbyte incorrect.")
-    if isinstance(password, str):
-        password = password.encode('utf-8')
-    addresshash = d[0:4]
-    d = d[4:-4]
-    key = scrypt.hash(password, addresshash, 16384, 8, 8, 64)
-    derivedhalf1 = key[0:32]
-    derivedhalf2 = key[32:64]
-    encryptedhalf1 = d[0:16]
-    encryptedhalf2 = d[16:32]
-    aes = pyaes.AESModeOfOperationECB(derivedhalf2)
-    decryptedhalf2 = aes.decrypt(encryptedhalf2)
-    decryptedhalf1 = aes.decrypt(encryptedhalf1)
-    priv = decryptedhalf1 + decryptedhalf2
-    priv = (int.from_bytes(priv, 'big') ^ int.from_bytes(derivedhalf1, 'big')).to_bytes(32, 'big')
-    # if compressed:
-    #     # FIXME: This works but does probably not follow the BIP38 standards (was before: priv = b'\0' + priv)
-    #     priv += b'\1'
-    return priv, addresshash, compressed
+    cipher = AES.new(key, AES.MODE_SIV)
+    ct, tag = cipher.encrypt_and_digest(data)
+    return ct + tag
 
 
-def bip38_encrypt(private_hex, address, password, flagbyte=b'\xe0'):
+def aes_decrypt(encrypted_data, key):
     """
-    BIP0038 non-ec-multiply encryption. Returns BIP0038 encrypted private key
-    Based on code from https://github.com/nomorecoin/python-bip38-testing
+    Decrypt encrypted data using AES Symmetric Block cipher Encryption in SIV mode. Use to decrypt data encrypted
+    with the :func:`aes_encrypt` method. The encrypted data attribute must contain a Ciphertext and 16-byte tag.
 
-    :param private_hex: Private key in hex format
-    :type private_hex: str
-    :param address: Address string
-    :type address: str
-    :param password: Required password for encryption
-    :type password: str
-    :param flagbyte: Flagbyte prefix for WIF
-    :type flagbyte: bytes
+    A nonce is not used, so data is encrypted deterministic, in SIV mode this doesn't reduce security.
+    (see https://pycryptodome.readthedocs.io/en/latest/src/cipher/modern.html#siv-mode)
 
-    :return str: BIP38 password encrypted private key
+    :param encrypted_data: Data to decrypt. Must consist of a ciphertext and 16 byte tag.
+    :type encrypted_data: bytes
+    :param key: The cryptographic key, size must be 32 bytes because AES-128 is used as cipher
+    :type key: bytes
+
+    :return bytes: Ciphertext and 16 bytes tag
+
     """
-    if isinstance(address, str):
-        address = address.encode('utf-8')
-    if isinstance(password, str):
-        password = password.encode('utf-8')
-    addresshash = double_sha256(address)[0:4]
-    key = scrypt.hash(password, addresshash, 16384, 8, 8, 64)
-    derivedhalf1 = key[0:32]
-    derivedhalf2 = key[32:64]
-    aes = pyaes.AESModeOfOperationECB(derivedhalf2)
-    encryptedhalf1 = \
-        aes.encrypt((int(private_hex[0:32], 16) ^ int.from_bytes(derivedhalf1[0:16], 'big')).to_bytes(16, 'big'))
-    encryptedhalf2 = \
-        aes.encrypt((int(private_hex[32:64], 16) ^ int.from_bytes(derivedhalf1[16:32], 'big')).to_bytes(16, 'big'))
-    encrypted_privkey = b'\x01\x42' + flagbyte + addresshash + encryptedhalf1 + encryptedhalf2
-    encrypted_privkey += double_sha256(encrypted_privkey)[:4]
-    return change_base(encrypted_privkey, 256, 58)
+    ct = encrypted_data[:-16]
+    tag = encrypted_data[-16:]
+    cipher2 = AES.new(key, AES.MODE_SIV)
+    try:
+        res = cipher2.decrypt_and_verify(ct, tag)
+    except ValueError as e:
+        raise EncodingError("Could not decrypt value (password incorrect?): %s" % e)
+    return res
+
+
+def scrypt_hash(password, salt, key_len=64, N=16384, r=8, p=1, buflen=64):
+    """
+    Wrapper for Scrypt method for scrypt or Cryptodome library
+
+    For documentation see methods in referring libraries
+
+    """
+    try:
+        password = to_bytes(password)
+        key = scrypt(password, salt=salt, n=N, r=r, p=p, dklen=key_len)
+    except Exception as E:
+        key = scrypt(password, salt, key_len, N, r, p)        # pycryptodome scrypt
+    return key
 
 
 class Quantity:
@@ -889,12 +1063,12 @@ class Quantity:
         # Metric prefixes according to BIPM, the International System of Units (SI) in 10**3 steps
         self.prefix_list = list('yzafpnμm1kMGTPEZY')
         self.base = self.prefix_list.index('1')
-        assert value > 0
+        assert value >= 0
 
         self.absolute = value
         self.units = units
         self.precision = precision
-        while (value < 1 or value > 1000) and 0 < self.base < len(self.prefix_list)-1:
+        while value != 0 and (value < 1 or value > 1000) and 0 < self.base < len(self.prefix_list)-1:
             if value > 1000:
                 self.base += 1
                 value /= 1000.0
@@ -905,4 +1079,7 @@ class Quantity:
 
     def __str__(self):
         # > Python 3.6: return f"{self.value:4.{self.precision}f} {self.prefix_list[self.base]}{self.units}"
-        return '%4.*f %s%s' % (self.precision, self.value, self.prefix_list[self.base], self.units)
+        prefix = self.prefix_list[self.base]
+        if prefix == '1':
+            prefix = ''
+        return ('%4.*f %s%s' % (self.precision, self.value, prefix, self.units)).strip()

@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Base Client
-#    © 2016 November - 1200 Web Development <http://1200wd.com/>
+#    © 2016 - 2024 May - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -19,6 +19,7 @@
 #
 
 import requests
+import urllib3
 from urllib.parse import urlencode
 import json
 from bitcoinlib.main import *
@@ -26,6 +27,9 @@ from bitcoinlib.networks import Network
 from bitcoinlib.keys import Address
 
 _logger = logging.getLogger(__name__)
+
+# Disable warnings about insecure requests, as we only connect to familiar sources and local nodes
+urllib3.disable_warnings()
 
 
 class ClientError(Exception):
@@ -40,12 +44,14 @@ class ClientError(Exception):
 class BaseClient(object):
 
     def __init__(self, network, provider, base_url, denominator, api_key='', provider_coin_id='',
-                 network_overrides=None, timeout=TIMEOUT_REQUESTS, latest_block=None):
+                 network_overrides=None, timeout=TIMEOUT_REQUESTS, latest_block=None, strict=True, wallet_name='',
+                 secure=True):
         try:
             self.network = network
             if not isinstance(network, Network):
                 self.network = Network(network)
             self.provider = provider
+
             self.base_url = base_url
             self.resp = None
             self.units = denominator
@@ -54,12 +60,15 @@ class BaseClient(object):
             self.network_overrides = {}
             self.timeout = timeout
             self.latest_block = latest_block
+            self.secure = secure
             if network_overrides is not None:
                 self.network_overrides = network_overrides
+            self.strict = strict
+            self.wallet_name = wallet_name
         except Exception:
             raise ClientError("This Network is not supported by %s Client" % provider)
 
-    def request(self, url_path, variables=None, method='get', secure=True, post_data=''):
+    def request(self, url_path, variables=None, method='get', secure=None, post_data='', header=None):
         url_vars = ''
         url = self.base_url + url_path
         if not url or not self.base_url:
@@ -67,10 +76,15 @@ class BaseClient(object):
         headers = {
             'User-Agent': 'BitcoinLib/%s' % BITCOINLIB_VERSION,
             'Accept': 'application/json',
-            # 'Content-Type': 'application/json',
             "Referrer": "https://www.github.com/1200wd/bitcoinlib",
         }
-        # ToDo: Check use 'headers = None' for some providers?
+        if self.api_key:
+            headers["Api-Key"] = self.api_key
+        if secure is not None:
+            self.secure = secure
+
+        if header:
+            headers.update(header)
         if method == 'get':
             if variables is None:
                 variables = {}
@@ -79,12 +93,12 @@ class BaseClient(object):
             url += url_vars
             log_url = url if '@' not in url else url.split('@')[1]
             _logger.info("Url get request %s" % log_url)
-            self.resp = requests.get(url, timeout=self.timeout, verify=secure, headers=headers)
+            self.resp = requests.get(url, timeout=self.timeout, verify=self.secure, headers=headers)
         elif method == 'post':
             log_url = url if '@' not in url else url.split('@')[1]
             _logger.info("Url post request %s" % log_url)
-            self.resp = requests.post(url, json=dict(variables), data=post_data, timeout=self.timeout, verify=secure,
-                                      headers=headers)
+            self.resp = requests.post(url, json=dict(variables), data=post_data, timeout=self.timeout,
+                                      verify=self.secure, headers=headers)
 
         resp_text = self.resp.text
         if len(resp_text) > 1000:

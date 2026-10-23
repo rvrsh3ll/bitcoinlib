@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    CryptoID Chainz client
-#    © 2018-2019 July - 1200 Web Development <http://1200wd.com/>
+#    © 2018-2022 October - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -19,11 +19,10 @@
 #
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from bitcoinlib.main import MAX_TRANSACTIONS
 from bitcoinlib.services.baseclient import BaseClient, ClientError
 from bitcoinlib.transactions import Transaction
-from bitcoinlib.encoding import to_bytes
 
 
 _logger = logging.getLogger(__name__)
@@ -47,9 +46,10 @@ class CryptoID(BaseClient):
         else:
             url_path = 'explorer/tx.raw.dws'
             variables.update({'coin': self.provider_coin_id})
-        if not self.api_key:
-            raise ClientError("Request a CryptoID API key before using this provider")
-        variables.update({'key': self.api_key})
+        # if not self.api_key:
+        #     raise ClientError("Request a CryptoID API key before using this provider")
+        if self.api_key:
+            variables.update({'key': self.api_key})
         return self.request(url_path, variables, method)
 
     def getbalance(self, addresslist):
@@ -58,7 +58,7 @@ class CryptoID(BaseClient):
         for a in addresslist:
             res = self.compose_request('getbalance', variables={'a': a.address})
             balance += float(res)
-        return int(balance * self.units)
+        return round(balance * self.units)
 
     def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
         if not self.api_key:
@@ -82,7 +82,7 @@ class CryptoID(BaseClient):
                 'block_height': None,
                 'fee': None,
                 'size': 0,
-                'value': int(utxo['value']),
+                'value': round(utxo['value']),
                 'script': utxo['script'],
                 'date': None
             })
@@ -91,12 +91,12 @@ class CryptoID(BaseClient):
     def gettransaction(self, txid):
         variables = {'id': txid, 'hex': None}
         tx = self.compose_request(path_type='explorer', variables=variables)
-        t = Transaction.parse_hex(tx['hex'], strict=False, network=self.network)
+        t = Transaction.parse_hex(tx['hex'], strict=self.strict, network=self.network)
         variables = {'t': txid}
         tx_api = self.compose_request('txinfo', path_type='api', variables=variables)
         for n, i in enumerate(t.inputs):
             if i.script_type != 'coinbase':
-                i.value = int(round(tx_api['inputs'][n]['amount'] * self.units, 0))
+                i.value = round(tx_api['inputs'][n]['amount'] * self.units)
             else:
                 i.value = 0
                 t.coinbase = True
@@ -106,7 +106,7 @@ class CryptoID(BaseClient):
             t.status = 'confirmed'
         else:
             t.status = 'unconfirmed'
-        t.date = datetime.utcfromtimestamp(tx['time'])
+        t.date = datetime.fromtimestamp(tx['time'], timezone.utc)
         t.block_height = tx_api['block']
         t.block_hash = tx['blockhash']
         t.confirmations = tx['confirmations']
@@ -115,14 +115,16 @@ class CryptoID(BaseClient):
         t.network = self.network
         t.locktime = tx['locktime']
         t.version = tx['version'].to_bytes(4, 'big')
-        t.output_total = int(round(tx_api['total_output'] * self.units, 0))
-        t.input_total = t.output_total
+        t.output_total = round(tx_api['total_output'] * self.units)
+        t.input_total = round(tx_api['total_input'] * self.units)
         t.fee = 0
         if t.input_total:
             t.fee = t.input_total - t.output_total
         return t
 
     def gettransactions(self, address, after_txid='', limit=MAX_TRANSACTIONS):
+        if not self.api_key:
+            raise ClientError("Method gettransactions() is not available for CryptoID without API key")
         address = self._address_convert(address)
         txs = []
         txids = []

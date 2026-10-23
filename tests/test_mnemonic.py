@@ -40,7 +40,7 @@ class TestMnemonics(unittest.TestCase):
             # print("Test %s => %s" % (v[0], phrase))
             self.assertEqual(v[1], phrase)
             self.assertEqual(v[2], seed)
-            k = HDKey.from_seed(seed)
+            k = HDKey.from_seed(seed, witness_type='legacy')
             self.assertEqual(k.wif(is_private=True), v[3])
 
     # From Copyright (c) 2013 Pavol Rusnak <https://github.com/trezor/python-mnemonic>
@@ -56,8 +56,13 @@ class TestMnemonics(unittest.TestCase):
         self.assertEqual(len(phrase.split(' ')), 12)
         self.assertEqual(Mnemonic.detect_language(phrase), 'dutch')
 
+    def test_mnemonic_generate_portuguese(self):
+        phrase = Mnemonic(language='portuguese').generate()
+        self.assertEqual(len(phrase.split(' ')), 12)
+        self.assertEqual(Mnemonic.detect_language(phrase), 'portuguese')
+
     def test_mnemonic_generate_error(self):
-        self.assertRaisesRegexp(ValueError, 'Strength should be divisible by 32', Mnemonic().generate, 11)
+        self.assertRaisesRegex(ValueError, 'Strength should be divisible by 32', Mnemonic().generate, 11)
 
     def test_mnemonic_to_entropy(self):
         phrase = 'usage grid neither voice worry armor sudden core excuse keen stand pudding'
@@ -68,22 +73,22 @@ class TestMnemonics(unittest.TestCase):
                          'chunk gun celery million wood kite tackle twenty story episode raccoon dutch')
         self.assertEqual(Mnemonic().to_mnemonic('28acfc94465fd2f6774759d6897ec122', add_checksum=False),
                          'action filter venture match garlic nut oven modify output dwarf wild cattle')
-        self.assertRaisesRegexp(ValueError, "Integer value of data should be in secp256k1 domain between 1 and "
+        self.assertRaisesRegex(ValueError, "Integer value of data should be in secp256k1 domain between 1 and "
                                             "secp256k1_n-1", Mnemonic().to_mnemonic,
                                 '28acfc94465fd2f6774759d6897ec12228acfc94465fd2f6774759d6897ec12228acfc94465fd2f6774')
 
     def test_mnemonic_to_seed_invalid_checksum(self):
         phrase = "runway truly foil future recall scatter garage over floor clutch shy boat"
-        self.assertRaisesRegexp(ValueError, "Invalid checksum 0110 for entropy", Mnemonic().to_seed, phrase)
+        self.assertRaisesRegex(ValueError, "Invalid checksum 0110 for entropy", Mnemonic().to_seed, phrase)
 
     def test_mnemonic_exceptions(self):
-        self.assertRaisesRegexp(ValueError, "Strength should be divisible by 32", Mnemonic().generate, 20)
-        self.assertRaisesRegexp(ValueError, "Data length in bits should be divisible by 32", Mnemonic().checksum,
+        self.assertRaisesRegex(ValueError, "Strength should be divisible by 32", Mnemonic().generate, 20)
+        self.assertRaisesRegex(ValueError, "Data length in bits should be divisible by 32", Mnemonic().checksum,
                                 'aabbccddeeff')
-        self.assertRaisesRegexp(Warning, "Unrecognised word",
+        self.assertRaisesRegex(Warning, "Unrecognised word",
                                 Mnemonic().sanitize_mnemonic,
                                 'action filter venture match garlic nut oven modify output dwarf wild fiets')
-        self.assertRaisesRegexp(Warning, "Could not detect language",
+        self.assertRaisesRegex(Warning, "Could not detect language",
                                 Mnemonic().detect_language,
                                 'floep fliep')
 
@@ -95,6 +100,7 @@ class TestMnemonics(unittest.TestCase):
         self.assertEqual(Mnemonic(language='japanese').word(2047), 'われる')
         self.assertEqual(Mnemonic(language='chinese_simplified').word(2047), '歇')
         self.assertEqual(Mnemonic(language='chinese_traditional').word(2047), '歇')
+        self.assertEqual(Mnemonic(language='portuguese').word(2047), 'zumbido')
         self.assertEqual(len(Mnemonic().wordlist()), 2048)
 
     def test_mnemonic_small_entropy_bug(self):

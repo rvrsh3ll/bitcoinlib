@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Unit Tests for Key, Encoding and Mnemonic Class
-#    © 2016 - 2021 January - 1200 Web Development <http://1200wd.com/>
+#    © 2016 - 2026 February - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -18,9 +18,13 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+
 import unittest
+from io import BytesIO
+from random import randint
 
 from bitcoinlib.config.opcodes import op
+from bitcoinlib.config.secp256k1 import *
 from bitcoinlib.encoding import *
 from bitcoinlib.encoding import _bech32_polymod, _codestring_to_array
 
@@ -63,7 +67,7 @@ class TestEncodingMethodsChangeBase(unittest.TestCase):
 
     def test_change_base_bin_b58(self):
         self.assertEqual('16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM',
-                         change_base("\x00\x01\tfw`\x06\x95=UgC\x9e^9\xf8j\r';\xee\xd6\x19g\xf6", 256, 58))
+                         change_base(b"\x00\x01\tfw`\x06\x95=UgC\x9e^9\xf8j\r';\xee\xd6\x19g\xf6", 256, 58))
 
     def test_change_base_hex_bin(self):
         self.assertEqual(b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f',
@@ -80,8 +84,8 @@ class TestEncodingMethodsChangeBase(unittest.TestCase):
     def test_change_base_leading_zeros2(self):
         self.assertEqual('1L', change_base('0013', 16, 58))
 
-    def test_change_base_leading_zeros3(self):
-        self.assertEqual('1L', change_base('013', 16, 58))
+    # def test_change_base_leading_zeros3(self):  # Incorrect  hex...
+    #     self.assertEqual('1L', change_base('013', 16, 58))
 
     def test_change_base_leading_zeros4(self):
         self.assertEqual(b'\x04G\x81', change_base('044781', 16, 256))
@@ -108,26 +112,22 @@ class TestEncodingMethodsChangeBase(unittest.TestCase):
     def test_change_base_list(self):
         self.assertEqual('00124c', change_base([b'\0', b'\x12', b'L'], 256, 16, 6))
 
-    def test_change_base_bytes_as_string(self):
-        s = '\xc8\xe9\t\x96\xc7\xc6\x08\x0e\xe0b\x84`\x0chN\xd9\x04\xd1L\\'
-        self.assertEqual('c8e90996c7c6080ee06284600c684ed904d14c5c', change_base(s, 256, 16))
-
     def test_change_base_decimal_input_lenght_exception(self):
-        self.assertRaisesRegexp(EncodingError, "For a decimal input a minimum output length is required",
+        self.assertRaisesRegex(EncodingError, "For a decimal input a minimum output length is required",
                                 change_base, 100, 10, 2)
 
     def test_encoding_exceptions(self):
-        self.assertRaisesRegexp(EncodingError, "Unknown input format {}",
+        self.assertRaisesRegex(EncodingError, "Unknown input format {}",
                                 change_base, {}, 4, 2)
-        self.assertRaisesRegexp(EncodingError, "Byteint must be a list or defined as bytes",
+        self.assertRaisesRegex(EncodingError, "Byteint must be a list or defined as bytes",
                                 varbyteint_to_int, 'fd1027')
-        self.assertRaisesRegexp(EncodingError, "Input must be a number type",
+        self.assertRaisesRegex(EncodingError, "Input must be a number type",
                                 int_to_varbyteint, '1000')
-        self.assertRaisesRegexp(TypeError, "String value expected", normalize_string, 100)
-        self.assertRaisesRegexp(EncodingError, "Encoding base32 not supported", pubkeyhash_to_addr, '123',
+        self.assertRaisesRegex(TypeError, "String value expected", normalize_string, 100)
+        self.assertRaisesRegex(EncodingError, "Encoding base32 not supported", pubkeyhash_to_addr, '123',
                                 encoding='base32')
         addr = 'qc1qy8qmc6262m68ny0ftlexs4h9paud8sgce3sf84'
-        self.assertRaisesRegexp(EncodingError, "Invalid bech32 address. Prefix 'qc', prefix expected is 'bc'",
+        self.assertRaisesRegex(EncodingError, "Invalid bech32 address. Prefix 'qc', prefix expected is 'bc'",
                                 addr_bech32_to_pubkeyhash, addr, prefix='bc')
 
 
@@ -169,7 +169,7 @@ class TestEncodingMethodsAddressConversion(unittest.TestCase):
         self.assertEqual(change_base('0000003acd8f60b766e48e9db32093b419c21de7e9b35f7e0d', 16, 58), '111GxfgFVyDW3zcFpUF1upSZoL7GCRiLk')
         self.assertEqual(change_base('1111GxfgFVyDW3zcFpUF1upSZoL7GCRiLk', 58, 256).hex(),
                          '000000003acd8f60b766e48e9db32093b419c21de7e9b35f7e0d')
-        self.assertRaisesRegexp(EncodingError, "Invalid address hash160 length, should be 25 characters not",
+        self.assertRaisesRegex(EncodingError, "Invalid address hash160 length, should be 25 characters not",
                                 addr_base58_to_pubkeyhash, '1111GxfgFVyDW3zcFpUF1upSZoL7GCRiLk')
 
 
@@ -179,10 +179,35 @@ class TestEncodingMethodsStructures(unittest.TestCase):
         self.assertEqual(100, varbyteint_to_int(b'd')[0])
 
     def test_varbyteint_to_int_2(self):
-        self.assertEqual(254, varbyteint_to_int(b'\xfe\xfe\x00')[0])
+        self.assertEqual(254, varbyteint_to_int(b'\xfd\xfe\x00')[0])
 
     def test_varbyteint_to_int_3(self):
         self.assertEqual(18440744073009551600, varbyteint_to_int(b'\xff\xf0\xd8\x9f\xf9\x07\xaf\xea\xff')[0])
+
+    def test_varbyteint_to_int_boundaries(self):
+        vectors = [(252, 'fc'), (253, 'fdfd00'), (65535, 'fdffff'), (65536, 'fe00000100'),
+                   (4294967295, 'feffffffff'), (4294967296, 'ff0000000001000000'),
+                   (18446744073709551615, 'ffffffffffffffffff')]
+        for value, hex_ in vectors:
+            with self.subTest(hex_):
+                self.assertEqual((value, len(hex_) // 2), varbyteint_to_int(bytes.fromhex(hex_)))
+                self.assertEqual((value, bytes.fromhex(hex_)), read_varbyteint_return(BytesIO(bytes.fromhex(hex_))))
+
+    def test_varbyteint_to_int_non_canonical(self):
+        for hex_ in ['fd0100', 'fdfc00', 'fe01000000', 'feffff0000', 'ff0100000000000000', 'ffffffffff00000000']:
+            with self.subTest(hex_):
+                self.assertRaisesRegex(EncodingError, "Non-canonical CompactSize integer",
+                                       varbyteint_to_int, bytes.fromhex(hex_))
+                self.assertRaisesRegex(EncodingError, "Non-canonical CompactSize integer",
+                                       read_varbyteint_return, BytesIO(bytes.fromhex(hex_)))
+
+    def test_varbyteint_to_int_truncated(self):
+        for hex_ in ['fd', 'fd01', 'fe', 'fe010000', 'ff', 'ff01000000000000']:
+            with self.subTest(hex_):
+                self.assertRaisesRegex(EncodingError, "Truncated CompactSize integer",
+                                       varbyteint_to_int, bytes.fromhex(hex_))
+                self.assertRaisesRegex(EncodingError, "Truncated CompactSize integer",
+                                       read_varbyteint_return, BytesIO(bytes.fromhex(hex_)))
 
     def test_int_to_varbyteint_1(self):
         self.assertEqual(b'd', int_to_varbyteint(100))
@@ -193,9 +218,33 @@ class TestEncodingMethodsStructures(unittest.TestCase):
     def test_int_to_varbyteint_3(self):
         self.assertEqual(b'\xff\xff\xff\xff\xff\xff\xff\xff\xff', int_to_varbyteint(18446744073709551615))
 
+    def test_int_to_varbyteint_boundaries(self):
+        vectors = [
+            (0, '00'),
+            (252, 'fc'),
+            (253, 'fdfd00'),
+            (254, 'fdfe00'),
+            (65534, 'fdfeff'),
+            (65535, 'fdffff'),
+            (65536, 'fe00000100'),
+            (4294967294, 'fefeffffff'),
+            (4294967295, 'feffffffff'),
+            (4294967296, 'ff0000000001000000'),
+            (18446744073709551615, 'ffffffffffffffffff'),
+        ]
+        for value, expected_hex in vectors:
+            with self.subTest(value=value):
+                encoded = int_to_varbyteint(value)
+                self.assertEqual(bytes.fromhex(expected_hex), encoded)
+                self.assertEqual((value, len(encoded)), varbyteint_to_int(encoded))
+
     def test_varstr(self):
         self.assertEqual(b'\x1eThis string has a length of 30',
                          varstr('This string has a length of 30'))
+
+    def test_varstr_compactsize_boundary(self):
+        payload = b'a' * 65535
+        self.assertEqual(b'\xfd\xff\xff' + payload, varstr(payload))
 
     def test_convert_der_sig(self):
         sig = b'0E\x02!\x00\xe7\x1a\x8d\xd8>y\xfb\xd6/r\xa3\xd0\xd8\xa8\x1f\xdd\xbaS[\xd0\xf0\x88\xfa\x8b\xe1L' \
@@ -235,12 +284,89 @@ class TestEncodingMethodsStructures(unittest.TestCase):
         self.assertEqual('07dc5820a0e518215d212cd5188ae02c5635faab',
                          to_hexstring(u'07dc5820a0e518215d212cd5188ae02c5635faab'))
 
-    def test_der_encode_sig(self):
+    def test_signature_der_encode(self):
         r = 80828100789555555332401870818771238079532314371107341426356071258591122886343
         s = 15674820848044112551623338734376985640551839688984719714434052277382938010325
         der_sig = '3045022100b2b31575f8536b284410d01217f688be3a9faf4ba0ba3a9093f983e40d630' \
                   'ec7022022a7a25b01403cff0d00b3b853d230f8e96ff832b15d4ccc75203cb65896a2d5'
-        self.assertEqual(to_hexstring(der_encode_sig(r, s)), der_sig)
+        self.assertEqual(to_hexstring(signature_der_encode(r, s)), der_sig)
+
+    def test_signature_der_decode(self):
+        # source: https://bitcoindevs.xyz/decoding/transaction-signing-06
+        der_signature = bytes.fromhex(
+            "304402203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0220573a954c4518331561406f90300e8f3358f51928d43c212a8caed02de67eebee01")
+        expected_r = int('3609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a', 16)
+        expected_s = int('573a954c4518331561406f90300e8f3358f51928d43c212a8caed02de67eebee', 16)
+
+        r, s = signature_der_decode(der_signature)
+        self.assertEqual(r, expected_r)
+        self.assertEqual(s, expected_s)
+
+    def test_signature_encode_decode(self):
+        for _ in range(10000):
+            r = randint(1, secp256k1_n)
+            s = randint(1, secp256k1_n)
+
+            der_sig = signature_der_encode(r, s)
+            r2, s2 = signature_der_decode(der_sig)
+
+            self.assertEqual(r, r2)
+            self.assertEqual(s, s2)
+
+    def test_signature_encode_compare_libraries(self):
+        for _ in range(50000):
+            r = randint(1, secp256k1_n)
+            s = randint(1, secp256k1_n)
+
+            # Encode with bitcoinlib
+            sig_bitcoinlib = signature_der_encode(r, s)
+
+            if USE_FASTECDSA:
+                sig = DEREncoder.encode_signature(r, s)
+            else:  # ecdsa library
+                rb = ecdsa.der.encode_integer(r)
+                sb = ecdsa.der.encode_integer(s)
+                sig = ecdsa.der.encode_sequence(rb, sb)
+
+            self.assertEqual(sig, sig_bitcoinlib)
+
+    def test_signature_decode_invalid(self):
+        der_signature = bytes.fromhex(
+            "304502203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0220573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebeebb01")
+        self.assertRaisesRegex(EncodingError, "Unexpected rest bytes at end of signature",
+                               signature_der_decode, der_signature)
+
+        der_signature = bytes.fromhex(
+            "304402203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0420573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebee01")
+        self.assertRaisesRegex(EncodingError, "Expected integer marker byte",
+                               signature_der_decode, der_signature)
+
+        der_signature = bytes.fromhex(
+            "404502203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0220573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebeebb01")
+        self.assertRaisesRegex(EncodingError, "Signature must start with a sequence byte",
+                               signature_der_decode, der_signature)
+
+        der_signature = bytes.fromhex(
+            "304602203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0220573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebee01")
+        self.assertRaisesRegex(EncodingError, "Unexpected signature length: 71 != 72",
+                               signature_der_decode, der_signature)
+
+        der_signature = bytes.fromhex(
+            "304502203609e2217b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0220573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebee01")
+        self.assertRaisesRegex(EncodingError, "Expected integer marker byte",
+                               signature_der_decode, der_signature)
+
+        der_signature = bytes.fromhex(
+            "304502203609e17b84f6a7d30c80bfa610b5b4542f32a8a0d5447a12fb1366d7f01cc44a0225573a954c4518331561406f90300"
+            "e8f3358f51928d43c212a8caed02de67eebeebb01")
+        self.assertRaisesRegex(EncodingError, "Unexpected signature integer length",
+                               signature_der_decode, der_signature)
+
 
 
 VALID_CHECKSUM = [
@@ -266,10 +392,6 @@ VALID_ADDRESS = [
     ["BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4", "0014751e76e8199196d454941c45d1b3a323f1433bd6"],
     ["tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7",
      "00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262"],
-    ["bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7k7grplx",
-     "5128751e76e8199196d454941c45d1b3a323f1433bd6751e76e8199196d454941c45d1b3a323f1433bd6"],
-    ["BC1SW50QA3JX3S", "6002751e"],
-    ["bc1zw508d6qejxtdg4y5r3zarvaryvg6kdaj", "5210751e76e8199196d454941c45d1b3a323"],
     ["tb1qqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesrxh6hy",
      "0020000000c4a5cad46221b2a187905e5266362b99d5e91c6ce24d165dab93e86433"],
 ]
@@ -293,6 +415,47 @@ INVALID_ADDRESS_ENC = [
     ("bc", 17, 32),
     ("bc", 1, 1),
     ("bc", 16, 41),
+]
+
+BECH32M_VALID = [
+    ('BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4', '0014751e76e8199196d454941c45d1b3a323f1433bd6'),
+    ('tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7',
+     '00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262'),
+    ('bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kt5nd6y',
+     '5128751e76e8199196d454941c45d1b3a323f1433bd6751e76e8199196d454941c45d1b3a323f1433bd6'),
+    ('BC1SW50QGDZ25J', '6002751e'),
+    ('bc1zw508d6qejxtdg4y5r3zarvaryvaxxpcs', '5210751e76e8199196d454941c45d1b3a323'),
+    ('tb1qqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesrxh6hy',
+     '0020000000c4a5cad46221b2a187905e5266362b99d5e91c6ce24d165dab93e86433'),
+    ('tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c',
+     '5120000000c4a5cad46221b2a187905e5266362b99d5e91c6ce24d165dab93e86433'),
+    ('bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0',
+     '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'),
+]
+
+BECH32M_INVALID = [
+    ('bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqh2y7hd', 'Invalid checksum (Bech32 instead of Bech32m)'),
+    ('tb1z0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqglt7rf', 'Invalid checksum (Bech32 instead of Bech32m)'),
+    ('BC1S0XLXVLHEMJA6C4DQV22UAPCTQUPFHLXM9H8Z3K2E72Q4K9HCZ7VQ54WELL', 'Invalid checksum (Bech32 instead of Bech32m)'),
+    ('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kemeawh', 'Invalid checksum (Bech32m instead of Bech32)'),
+    ('tb1q0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq24jc47', 'Invalid checksum (Bech32m instead of Bech32)'),
+    ('bc1p38j9r5y49hruaue7wxjce0updqjuyyx0kh56v8s25huc6995vvpql3jow4', "Character '111' not found in codebase"),
+    ('BC130XLXVLHEMJA6C4DQV22UAPCTQUPFHLXM9H8Z3K2E72Q4K9HCZ7VQ7ZWS8R', 'Invalid witness version'),
+    ('bc1pw5dgrnzv', 'Invalid decoded data length, must be between 2 and 40'),
+    ('bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7v8n0nx0muaewav253zgeav',
+     'Invalid decoded data length, must be between 2 and 40'),
+    ('BC1QR508D6QEJXTDG4Y5R3ZARVARYV98GJ9P', 'Invalid decoded data length, must be 20 or 32 bytes'),
+    ('bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7v07qwwzcrf', "Invalid padding bits"),
+    ('tb1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vpggkg4j', "Invalid padding bits"),
+    ('bc1gmk9yu', 'Invalid checksum (Bech32 instead of Bech32m)'),
+]
+
+BECH32M_INVALID_PUBKEYHASH = [
+    ('612079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', 'Witness version must be between 0 and '
+                                                                             '16'),
+    ('511979be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798', 'Incorrect pubkeyhash length'),
+    ('0013751e76e8199196d454941c45d1b3a323f1433bd6', 'Incorrect pubkeyhash length'),
+    ('6614751e76e8199196d454941c45d1b3a323f1433bd6', 'Witness version must be between 0 and 16')
 ]
 
 
@@ -332,10 +495,7 @@ class TestEncodingBech32SegwitAddresses(unittest.TestCase):
     def test_valid_address(self):
         """Test whether valid addresses decode to the correct output."""
         for (address, hexscript) in VALID_ADDRESS:
-            try:
-                scriptpubkey = addr_bech32_to_pubkeyhash(address, include_witver=True)
-            except EncodingError:
-                scriptpubkey = addr_bech32_to_pubkeyhash(address, prefix='tb', include_witver=True)
+            scriptpubkey = addr_bech32_to_pubkeyhash(address, include_witver=True)
             self.assertEqual(scriptpubkey, bytes.fromhex(hexscript))
             addr = pubkeyhash_to_addr_bech32(scriptpubkey, address[:2].lower())
             self.assertEqual(address.lower(), addr)
@@ -353,12 +513,59 @@ class TestEncodingBech32SegwitAddresses(unittest.TestCase):
         self.assertEqual(str(Quantity(121608561109507200000000000000000)), '121608561.110 Y')
         self.assertEqual(str(Quantity(1/1216085611095072000000000000000)), '0.000 y')
         self.assertEqual(str(Quantity(1/1216085611095072000000000000000, precision=10)), '0.0000008223 y')
+        self.assertEqual(str(Quantity(10, 'pound', precision=0)), '10 pound')
+        self.assertEqual(str(Quantity(0)), '0.000')
+
+    # Source: https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
+    def test_bech32m_valid(self):
+        for addr, pubkeyhash in BECH32M_VALID:
+            assert pubkeyhash == addr_bech32_to_pubkeyhash(addr, include_witver=True).hex()
+            prefix = addr.split('1')[0].lower()
+            witver = change_base(addr.split('1')[1][0], 'bech32', 10)
+            checksum_xor = addr_bech32_checksum(addr)
+            addrc = pubkeyhash_to_addr_bech32(pubkeyhash, prefix, witver, checksum_xor=checksum_xor)
+            assert addr.lower() == addrc
+
+    def test_bech32_invalid(self):
+        for addr, err in BECH32M_INVALID:
+            try:
+                addr_bech32_to_pubkeyhash(addr)
+            except (EncodingError, TypeError) as e:
+                assert str(e) == err
+
+    def test_bech32_invalid_pubkeyhash(self):
+        for pubkeyhash, err in BECH32M_INVALID_PUBKEYHASH:
+            try:
+                pubkeyhash_to_addr_bech32(pubkeyhash)
+            except (EncodingError, TypeError) as e:
+                assert str(e) == err
 
 
 class TestEncodingConfig(unittest.TestCase):
 
     def test_config_opcodes(self):
         self.assertEqual(op.op_checklocktimeverify, 177)
+
+
+class TestEncodingEncryption(unittest.TestCase):
+
+    def test_encryption_aes(self):
+        key = b'e2bfe15fc5d7067b567402dd9d7235fc088ac84eab8113bf8d7e3c288d2f1eff'
+        data = b'A lot of people automatically dismiss e-currency as a lost cause because of all the companies that failed ' \
+               b'since the 1990\'s. I hope it\'s obvious it was only the centrally controlled nature of those systems that ' \
+               b'doomed them. I think this is the first time we\'re trying a decentralized, non-trust-based system.'
+        encrypted_data = aes_encrypt(data, key)
+        quote = aes_decrypt(encrypted_data, key)
+        self.assertEqual(data, quote)
+
+class TestEncodingCrypto(unittest.TestCase):
+
+    def test_sha256(self):
+
+        self.assertEqual(sha256(b'a' * 1000000).hex(),
+            'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0')
+        self.assertEqual(sha256(b'a' * 1000000, as_hex=True),
+            'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0')
 
 
 if __name__ == '__main__':

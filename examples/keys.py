@@ -4,7 +4,7 @@
 #
 #    EXAMPLES - Key and HDKey Class
 #
-#    © 2017 - 2020 October - 1200 Web Development <http://1200wd.com/>
+#    © 2017 - 2024 June - 1200 Web Development <http://1200wd.com/>
 #
 
 from pprint import pprint
@@ -49,7 +49,7 @@ k.info()
 print("\n=== Import uncompressed Private Key and Encrypt with BIP38 ===")
 k = Key('5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR')
 print("Private key     %s" % k.wif())
-print("Encrypted pk    %s " % k.bip38_encrypt('TestingOneTwoThree'))
+print("Encrypted pk    %s " % k.encrypt('TestingOneTwoThree'))
 print("Is Compressed   %s\n" % k.compressed)
 
 print("\n=== Import and Decrypt BIP38 Key ===")
@@ -73,10 +73,6 @@ print("\n=== Generate random Litecoin key ===")
 lk = HDKey(network='litecoin')
 lk.info()
 
-print("\n=== Generate random Dash key ===")
-lk = HDKey(network='dash')
-lk.info()
-
 print("\n=== Import simple private key as HDKey ===")
 k = HDKey('L5fbTtqEKPK6zeuCBivnQ8FALMEq6ZApD7wkHZoMUsBWcktBev73')
 print("HD Key WIF for Private Key L5fbTtqEKPK6zeuCBivnQ8FALMEq6ZApD7wkHZoMUsBWcktBev73:  %s" % k.wif())
@@ -84,8 +80,8 @@ print("Key type is : %s" % k.key_type)
 
 print("\n=== Derive path with Child Key derivation ===")
 print("Derive path path 'm/0H/1':")
-print("  Private Extended WIF: %s" % k.subkey_for_path('m/0H/1').wif())
-print("  Public Extended WIF : %s\n" % k.subkey_for_path('m/0H/1').wif_public())
+print("  Private Extended WIF: %s" % k.key_for_path('m/0H/1').wif())
+print("  Public Extended WIF : %s\n" % k.key_for_path('m/0H/1').wif_public())
 
 print("\n=== Test Child Key Derivation ===")
 print("Use the 2 different methods to derive child keys. One through derivation from public parent, "
@@ -122,7 +118,6 @@ print(Address(pk, script_type='p2sh').address)
 print(Address(pk, encoding='bech32').address)
 print(Address(pk, script_type='p2sh', encoding='bech32').address)
 print(Address(pk, encoding='bech32', network='litecoin').address)
-print(Address(pk, encoding='bech32', network='dash').address)
 
 
 #

@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    BlockCypher client
-#    © 2017-2019 July - 1200 Web Development <http://1200wd.com/>
+#    © 2017-2023 May - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -54,55 +54,54 @@ class BlockCypher(BaseClient):
             res = [res]
         for rec in res:
             balance += float(rec['final_balance'])
-        return int(balance * self.units)
+        return round(balance * self.units)
 
-    # Disabled: Invalid results for https://api.blockcypher.com/v1/ltc/main/addrs/LVqLipGhyQ1nWtPPc8Xp3zn6JxcU1Hi8eG?unspentOnly=1&limit=2000
-    # def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
-    #     address = self._address_convert(address)
-    #     res = self.compose_request('addrs', address.address, variables={'unspentOnly': 1, 'limit': 2000})
-    #     transactions = []
-    #     if not isinstance(res, list):
-    #         res = [res]
-    #     for a in res:
-    #         txrefs = a.setdefault('txrefs', []) + a.get('unconfirmed_txrefs', [])
-    #         if len(txrefs) > 500:
-    #             _logger.warning("BlockCypher: Large number of transactions for address %s, "
-    #                             "Transaction list may be incomplete" % address)
-    #         for tx in txrefs:
-    #             if tx['tx_hash'] == after_txid:
-    #                 break
-    #             tdate = None
-    #             if 'confirmed' in tx:
-    #                 try:
-    #                     tdate = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%SZ")
-    #                 except ValueError:
-    #                     tdate = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%S.%fZ")
-    #             transactions.append({
-    #                 'address': address.address_orig,
-    #                 'txid': tx['tx_hash'],
-    #                 'confirmations': tx['confirmations'],
-    #                 'output_n': tx['tx_output_n'],
-    #                 'index': 0,
-    #                 'value': int(round(tx['value'] * self.units, 0)),
-    #                 'script': '',
-    #                 'block_height': None,
-    #                 'date': tdate
-    #             })
-    #     return transactions[::-1][:limit]
+    def getutxos(self, address, after_txid='', limit=MAX_TRANSACTIONS):
+        address = self._address_convert(address)
+        res = self.compose_request('addrs', address.address, variables={'unspentOnly': 1, 'limit': 2000})
+        transactions = []
+        if not isinstance(res, list):
+            res = [res]
+        for a in res:
+            txrefs = a.setdefault('txrefs', []) + a.get('unconfirmed_txrefs', [])
+            if len(txrefs) > 500:
+                _logger.warning("BlockCypher: Large number of transactions for address %s, "
+                                "Transaction list may be incomplete" % address)
+            for tx in txrefs:
+                if tx['tx_hash'] == after_txid:
+                    break
+                tdate = None
+                if 'confirmed' in tx:
+                    try:
+                        tdate = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        tdate = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+                transactions.append({
+                    'address': address.address_orig,
+                    'txid': tx['tx_hash'],
+                    'confirmations': tx['confirmations'],
+                    'output_n': tx['tx_output_n'],
+                    'index': 0,
+                    'value': round(tx['value'] * self.units),
+                    'script': '',
+                    'block_height': None,
+                    'date': tdate
+                })
+        return transactions[::-1][:limit]
 
     def gettransaction(self, txid):
         tx = self.compose_request('txs', txid, variables={'includeHex': 'true'})
-        t = Transaction.parse_hex(tx['hex'], strict=False, network=self.network)
+        t = Transaction.parse_hex(tx['hex'], strict=self.strict, network=self.network)
         if tx['confirmations']:
             t.status = 'confirmed'
-            t.date = datetime.strptime(tx['confirmed'][:19], "%Y-%m-%dT%H:%M:%S")
+            t.date = datetime.strptime(tx['confirmed'][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
         else:
             t.status = 'unconfirmed'
         t.confirmations = tx['confirmations']
         t.block_height = tx['block_height'] if tx['block_height'] > 0 else None
         t.fee = tx['fees']
         t.rawtx = bytes.fromhex(tx['hex'])
-        t.size = int(len(tx['hex']) / 2)
+        t.size = round(len(tx['hex']) / 2)
         t.network = self.network
         t.input_total = 0
         if len(t.inputs) != len(tx['inputs']):
@@ -153,7 +152,7 @@ class BlockCypher(BaseClient):
     def sendrawtransaction(self, rawtx):
         # BlockCypher sometimes accepts transactions, but does not push them to the network :(
         if self.network.name in ['bitcoin', 'litecoin']:
-            return False
+            raise ClientError("Avoid stuck transactions, skip usage of blockcypher provider")
         res = self.compose_request('txs', 'push', variables={'tx': rawtx}, method='post')
         return {
             'txid': res['tx']['hash'],
@@ -186,8 +185,9 @@ class BlockCypher(BaseClient):
         if parse_transactions:
             txs = []
             for txid in bd['txids']:
+                tx = self.gettransaction(txid)
                 try:
-                    txs.append(self.gettransaction(txid))
+                    txs.append(tx)
                 except Exception as e:
                     _logger.error("Could not parse tx %s with error %s" % (txid, e))
         else:
@@ -217,4 +217,12 @@ class BlockCypher(BaseClient):
         t = self.gettransaction(txid)
         return 1 if t.outputs[output_n].spent else 0
 
-    # def getinfo(self):
+    def getinfo(self):
+        info = self.compose_request('', '')
+        return {
+            'blockcount': info['height'],
+            'chain': info['name'],
+            'difficulty': 0,
+            'hashrate': 0,
+            'mempool_size': info['unconfirmed_count'],
+        }

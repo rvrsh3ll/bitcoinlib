@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    MNEMONIC class for BIP0039 Mnemonic Key management
-#    © 2016 - 2020 November - 1200 Web Development <http://1200wd.com/>
+#    © 2016 - 2024 June - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -35,7 +35,7 @@ class Mnemonic(object):
         """
         Init Mnemonic class and read wordlist of specified language
         
-        :param language: use specific wordlist, i.e. chinese, dutch (in development), english, french, italian, japanese or spanish. Leave empty for default 'english'
+        :param language: use specific wordlist, i.e. Chinese, Dutch (in development), English, French, Italian, Japanese or Spanish. Leave empty for default 'English'
         :type language: str
         
         """
@@ -82,8 +82,8 @@ class Mnemonic(object):
         # Check if passphrase is valid
         if validate:
             self.to_entropy(words)
-        mnemonic = to_bytes(words)
-        password = to_bytes(password)
+        mnemonic = bytes(words, 'utf8')
+        password = bytes(password, 'utf8')
         return hashlib.pbkdf2_hmac(hash_name='sha512', password=mnemonic, salt=b'mnemonic' + password,
                                    iterations=2048)
 
@@ -206,7 +206,7 @@ class Mnemonic(object):
         wlcount = {}
         for fn in Path(BCL_INSTALL_DIR, 'wordlist').iterdir():
             if fn.suffix == ".txt":
-                with open(os.path.join(str(BCL_INSTALL_DIR), 'wordlist', fn)) as f:
+                with open(os.path.join(str(BCL_INSTALL_DIR), 'wordlist', fn), encoding='utf-8') as f:
                     wordlist = [w.strip() for w in f.readlines()]
                     language = fn.name.split('.')[0]
                     wlcount[language] = 0

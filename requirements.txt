@@ -1,6 +1,12 @@
-requests==2.26.0
-fastecdsa==2.2.1
-pyaes==1.6.1
-scrypt==0.8.18
-SQLAlchemy==1.4.23
-numpy==1.21.2
+requests>=2.25.0
+fastecdsa>=2.3.2,<4.0.0
+pycryptodome>=3.20.0
+SQLAlchemy>=2.0.20
+sphinx>=7.2.0
+psycopg>=3.1.16
+coveralls >= 4.0.1
+mysql-connector-python>=8.4.0
+mysqlclient>=2.2.0
+sphinx_rtd_theme>=2.0.0
+Cython>=3.0.8
+win-unicode-console;platform_system=="Windows"

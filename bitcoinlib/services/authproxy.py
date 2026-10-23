@@ -45,7 +45,7 @@ import urllib.parse as urlparse
 
 USER_AGENT = "AuthServiceProxy/0.1"
 
-HTTP_TIMEOUT = 30
+HTTP_TIMEOUT = 10
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class AuthServiceProxy(object):
         self.__service_name = service_name
         self.__url = urlparse.urlparse(service_url)
         if self.__url.port is None:
-            port = 80
+            port = 443 if self.__url.scheme == 'https' else 80
         else:
             port = self.__url.port
         (user, passwd) = (self.__url.username, self.__url.password)
@@ -98,8 +98,9 @@ class AuthServiceProxy(object):
             passwd = passwd.encode('utf8')
         except AttributeError:
             pass
-        authpair = user + b':' + passwd
-        self.__auth_header = b'Basic ' + base64.b64encode(authpair)
+        if not (user is None or passwd is None):
+            authpair = user + b':' + passwd
+            self.__auth_header = b'Basic ' + base64.b64encode(authpair)
 
         self.__timeout = timeout
 
@@ -167,7 +168,7 @@ class AuthServiceProxy(object):
         results = []
         responses = self._get_response()
         for response in responses:
-            if response['error'] is not None:
+            if response.get('error') is not None:
                 raise JSONRPCException(response['error'])
             elif 'result' not in response:
                 raise JSONRPCException({
@@ -191,7 +192,7 @@ class AuthServiceProxy(object):
         responsedata = http_response.read().decode('utf8')
         response = json.loads(responsedata, parse_float=decimal.Decimal)
         if "error" in response and response["error"] is None:
-            log.debug("<-%s- %s" % (response["id"], json.dumps(response["result"], default=EncodeDecimal)))
+            log.debug("<-%s- %s" % (response["id"], json.dumps(response["result"], default=EncodeDecimal)[:1000]))
         else:
-            log.debug("<-- " + responsedata)
+            log.debug("<-- " + responsedata[:1000])
         return response

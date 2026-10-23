@@ -2,7 +2,7 @@
 #
 #    BitcoinLib - Python Cryptocurrency Library
 #    Scripts class - Parse, Serialize and Evaluate scripts
-#    © 2021 - 1200 Web Development <http://1200wd.com/>
+#    © 2022 - 2026 June - 1200 Web Development <http://1200wd.com/>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -28,33 +28,6 @@ from bitcoinlib.keys import Signature, Key
 _logger = logging.getLogger(__name__)
 
 
-SCRIPT_TYPES = {
-    # <name>: (<type>, <script_commands>, <data-lengths>)
-    'p2pkh': ('locking', [op.op_dup, op.op_hash160, 'data', op.op_equalverify, op.op_checksig], [20]),
-    'p2pkh_drop': ('locking', ['data', op.op_drop, op.op_dup, op.op_hash160, 'data', op.op_equalverify, op.op_checksig],
-                   [32, 20]),
-    'p2sh': ('locking', [op.op_hash160, 'data', op.op_equal], [20]),
-    'p2wpkh': ('locking', [op.op_0, 'data'], [20]),
-    'p2wsh': ('locking', [op.op_0, 'data'], [32]),
-    'multisig': ('locking', ['op_n', 'key', 'op_n', op.op_checkmultisig], []),
-    'p2pk': ('locking', ['key', op.op_checksig], []),
-    'nulldata': ('locking', [op.op_return, 'data'], [0]),
-    'nulldata_1': ('locking', [op.op_return, op.op_0], []),
-    'nulldata_2': ('locking', [op.op_return], []),
-    'sig_pubkey': ('unlocking', ['signature', 'key'], []),
-    # 'p2sh_multisig': ('unlocking', [op.op_0, 'signature', 'op_n', 'key', 'op_n', op.op_checkmultisig], []),
-    'p2sh_multisig': ('unlocking', [op.op_0, 'signature', 'redeemscript'], []),
-    'p2sh_multisig_2?': ('unlocking', [op.op_0, 'signature', op.op_verify, 'redeemscript'], []),
-    'p2sh_multisig_3?': ('unlocking', [op.op_0, 'signature', op.op_1add, 'redeemscript'], []),
-    'p2sh_p2wpkh': ('unlocking', [op.op_0, op.op_hash160, 'redeemscript', op.op_equal], []),
-    'p2sh_p2wsh': ('unlocking', [op.op_0, 'redeemscript'], []),
-    'signature': ('unlocking', ['signature'], []),
-    'signature_multisig': ('unlocking', [op.op_0, 'signature'], []),
-    'locktime_cltv': ('unlocking', ['locktime_cltv', op.op_checklocktimeverify, op.op_drop], []),
-    'locktime_csv': ('unlocking', ['locktime_csv', op.op_checksequenceverify, op.op_drop], []),
-}
-
-
 class ScriptError(Exception):
     """
     Handle Key class Exceptions
@@ -68,7 +41,7 @@ class ScriptError(Exception):
         return self.msg
 
 
-def _get_script_types(blueprint):
+def _get_script_types(blueprint, is_locking=None):
     # Convert blueprint to more generic format
     bp = []
     for item in blueprint:
@@ -80,20 +53,33 @@ def _get_script_types(blueprint):
             bp[-1] = 'key'
         elif item == 'signature' and len(bp) and bp[-1] == 'signature':
             bp[-1] = 'signature'
+        elif isinstance(item, list):
+            bp.append('redeemscript')
         else:
             bp.append(item)
-    bp_len = [int(c.split('-')[1]) for c in blueprint if isinstance(c, str) and c[:4] == 'data']
 
+    if is_locking is None:
+        locktype = ['locking', 'unlocking']
+    elif is_locking:
+        locktype = ['locking']
+    else:
+        locktype = ['unlocking']
+
+    script_types = [key for key, values in SCRIPT_TYPES.items() if values[1] == bp and values[0] in locktype]
+    if len(script_types) == 1:
+        return script_types
+
+    bp_len = [int(c.split('-')[1]) for c in blueprint if isinstance(c, str) and c[:4] == 'data']
     script_types = []
     while len(bp):
         # Find all possible matches with blueprint
         matches = [(key, len(values[1]), values[2]) for key, values in SCRIPT_TYPES.items() if
-                   values[1] == bp[:len(values[1])]]
+                   values[1] == bp[:len(values[1])] and values[0] in locktype]
         if not matches:
             script_types.append('unknown')
             break
 
-        # Select match with correct data length if more then 1 match is found
+        # Select match with correct data length if more than 1 match is found
         match_id = 0
         for match in matches:
             data_lens = match[2]
@@ -103,9 +89,10 @@ def _get_script_types(blueprint):
                     match_id = matches.index(match)
                     break
 
-        # Add script type to list
+        # Add script type to list, if script is p2sh embedded multisig set type to p2sh_multisig
         script_type = matches[match_id][0]
-        if script_type == 'multisig' and script_types[-1:] == ['signature_multisig']:
+        if (script_type == 'multisig' or script_type == 'multisig_redeemscript') \
+                and script_types[-1:] == ['signature_multisig']:
             script_types.pop()
             script_type = 'p2sh_multisig'
         script_types.append(script_type)
@@ -145,12 +132,14 @@ def get_data_type(data):
         return 'key_object'
     elif isinstance(data, Signature):
         return 'signature_object'
+    elif isinstance(data, list):
+        return 'redeemscript'
     elif data.startswith(b'\x30') and 69 <= len(data) <= 74:
         return 'signature'
     elif ((data.startswith(b'\x02') or data.startswith(b'\x03')) and len(data) == 33) or \
             (data.startswith(b'\x04') and len(data) == 65):
         return 'key'
-    elif len(data) == 20 or len(data) == 32 or 1 < len(data) <= 4:
+    elif len(data) == 20 or len(data) == 32 or len(data) == 64 or 1 <= len(data) <= 4:
         return 'data-%d' % len(data)
     else:
         return 'other'
@@ -159,14 +148,14 @@ def get_data_type(data):
 class Script(object):
 
     def __init__(self, commands=None, message=None, script_types='', is_locking=True, keys=None, signatures=None,
-                 blueprint=None, tx_data=None, public_hash=b'', sigs_required=None, redeemscript=b'',
+                 blueprint=None, env_data=None, public_hash=b'', sigs_required=None, redeemscript=b'',
                  hash_type=SIGHASH_ALL):
         """
         Create a Script object with specified parameters. Use parse() method to create a Script from raw hex
 
         >>> s = Script([op.op_2, op.op_4, op.op_add])
         >>> s
-        <Script([op.op_2, op.op_4, op.op_add])>
+        <Script([op_2, op_4, op_add])>
         >>> s.blueprint
         [82, 84, 147]
         >>> s.evaluate()
@@ -175,6 +164,12 @@ class Script(object):
         Stack is empty now, because evaluate pops last item from stack and check if is non-zero
         >>> s.stack
         []
+
+        >>> key1 = '5JruagvxNLXTnkksyLMfgFgf3CagJ3Ekxu5oGxpTm5mPfTAPez3'
+        >>> key2 = '5JX3qAwDEEaapvLXRfbXRMSiyRgRSW9WjgxeyJQWwBugbudCwsk'
+        >>> key3 = '5JjHVMwJdjPEPQhq34WMUhzLcEd4SD7HgZktEh8WHstWcCLRceV'
+        >>> keylist = [Key(k) for k in [key1, key2, key3]]
+        >>> redeemscript = Script(keys=keylist, sigs_required=2, script_types=['multisig'])
 
         :param commands: List of script language commands
         :type commands: list
@@ -190,14 +185,14 @@ class Script(object):
         :type signatures: list of Signature
         :param blueprint: Simplified version of script, normally generated by Script object
         :type blueprint: list of str
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
-        :type tx_data: dict
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
         :param public_hash: Public hash of key or redeemscript used to create scripts
         :type public_hash: bytes
         :param sigs_required: Nubmer of signatures required to create multisig script
         :type sigs_required: int
         :param redeemscript: Provide redeemscript to create a new (multisig) script
-        :type redeemscript: bytes
+        :type redeemscript: bytes, Script
         :param hash_type: Specific script hash type, default is SIGHASH_ALL
         :type hash_type: int
         """
@@ -210,13 +205,18 @@ class Script(object):
         self.keys = keys if keys else []
         self.signatures = signatures if signatures else []
         self._blueprint = blueprint if blueprint else []
-        self.tx_data = {} if not tx_data else tx_data
+        self.env_data = {} if not env_data else env_data
         self.sigs_required = sigs_required if sigs_required else len(self.keys) if len(self.keys) else 1
-        self.redeemscript = redeemscript
+        self.redeemscript_obj = None
+        if isinstance(redeemscript, Script):
+            self.redeemscript_obj = redeemscript
+            self.redeemscript = redeemscript.as_bytes()
+        else:
+            self.redeemscript = redeemscript
         self.public_hash = public_hash
         self.hash_type = hash_type
 
-        if not self.commands and self.script_types and (self.keys or self.signatures or self.public_hash):
+        if not self.commands and self.script_types:      # and (self.keys or self.signatures or self.public_hash):
             for st in self.script_types:
                 st_values = SCRIPT_TYPES[st]
                 script_template = st_values[1]
@@ -234,11 +234,13 @@ class Script(object):
                         command = [sig_n_and_m.pop() + 80]
                     elif tc == 'redeemscript':
                         command = [self.redeemscript]
+                    elif tc in self.env_data:
+                        command = [env_data[tc]]
                     if not command or command == [b'']:
                         raise ScriptError("Cannot create script, please supply %s" % (tc if tc != 'data' else
                                           'public key hash'))
                     self.commands += command
-        if not (self.keys and self.signatures and self.blueprint):
+        if not (self.keys and self.signatures and self._blueprint):
             self._blueprint = []
             for c in self.commands:
                 if isinstance(c, int):
@@ -255,21 +257,23 @@ class Script(object):
                         self._blueprint.append('data-%d' % len(c))
 
     @classmethod
-    def parse(cls, script, message=None, tx_data=None, strict=True, _level=0):
+    def parse(cls, script, message=None, env_data=None, is_locking=None, strict=True, _level=0):
         """
         Parse raw script and return Script object. Extracts script commands, keys, signatures and other data.
 
         Wrapper for the :func:`parse_bytesio` method. Convert hexadecimal string or bytes script to BytesIO.
 
         >>> Script.parse('76a914af8e14a2cecd715c363b3a72b55b59a31e2acac988ac')
-        <Script([op.op_dup, op.op_hash160, data-20, op.op_equalverify, op.op_checksig])>
+        <Script([op_dup, op_hash160, data-20, op_equalverify, op_checksig])>
 
         :param script: Raw script to parse in bytes, BytesIO or hexadecimal string format
         :type script: BytesIO, bytes, str
         :param message: Signed message to verify, normally a transaction hash
         :type message: bytes
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
-        :type tx_data: dict
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
+        :param is_locking: Is this a locking script or not, use None if not known and derive from script.
+        :param is_locking: bool, None
         :param strict: Raise exception when script is malformed, incomplete or not understood. Default is True
         :type strict: bool
         :param _level: Internal argument used to avoid recursive depth
@@ -277,14 +281,17 @@ class Script(object):
 
         :return Script:
         """
+        data_length = None
         if isinstance(script, bytes):
+            data_length = len(script)
             script = BytesIO(script)
         elif isinstance(script, str):
+            data_length = len(script) // 2
             script = BytesIO(bytes.fromhex(script))
-        return cls.parse_bytesio(script, message, tx_data, strict, _level)
+        return cls.parse_bytesio(script, message, env_data, data_length, is_locking, strict, _level)
 
     @classmethod
-    def parse_bytesio(cls, script, message=None, tx_data=None, strict=True, _level=0):
+    def parse_bytesio(cls, script, message=None, env_data=None, data_length=0, is_locking=None, strict=True, _level=0):
         """
         Parse raw script and return Script object. Extracts script commands, keys, signatures and other data.
 
@@ -292,8 +299,12 @@ class Script(object):
         :type script: BytesIO
         :param message: Signed message to verify, normally a transaction hash
         :type message: bytes
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
-        :type tx_data: dict
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
+        :param data_length: Length of script data if known. Supply if you can to increase efficiency and lower change of incorrect parsing
+        :type data_length: int
+        :param is_locking: Is this a locking script or not, use None if not known and derive from script.
+        :param is_locking: bool, None
         :param strict: Raise exception when script is malformed, incomplete or not understood. Default is True
         :type strict: bool
         :param _level: Internal argument used to avoid recursive depth
@@ -306,42 +317,41 @@ class Script(object):
         keys = []
         blueprint = []
         redeemscript = b''
+        redeemscript_obj = None
         sigs_required = None
         # hash_type = SIGHASH_ALL  # todo: check
         hash_type = None
-        if not tx_data:
-            tx_data = {}
+        if not env_data:
+            env_data = {}
 
-        while script:
-            chb = script.read(1)
-            if not chb:
-                break
-            ch = int.from_bytes(chb, 'big')
-            data = None
+        chb = script.read(1)
+        ch = int.from_bytes(chb, 'big')
+        data = None
+        if chb == b'\x30' and 69 <= data_length <= 74:
+            data = chb + script.read(data_length - 1)
+        elif ((chb == b'\x02' or chb == b'\x03') and data_length == 33) or \
+                (chb == b'\x04' and data_length == 65):
+            data = chb + script.read(data_length - 1)
+        elif data_length == 64:
+            data = chb + script.read(data_length - 1)
+        else:
             data_length = 0
-            if 1 <= ch <= 75:  # Data`
-                data_length = ch
-            elif ch == op.op_pushdata1:
-                data_length = int.from_bytes(script.read(1), 'little')
-            elif ch == op.op_pushdata2:
-                data_length = int.from_bytes(script.read(2), 'little')
-            if data_length:
-                data = script.read(data_length)
-                if len(data) != data_length:
-                    msg = "Malformed script, not enough data found"
-                    if strict:
-                        raise ScriptError(msg)
-                    else:
-                        _logger.warning(msg)
 
+        while chb and script:
             if data:
                 data_type = get_data_type(data)
                 commands.append(data)
                 if data_type == 'signature':
-                    sig = Signature.parse_bytes(data)
-                    signatures.append(sig)
-                    hash_type = sig.hash_type
-                    blueprint.append('signature')
+                    try:
+                        sig = Signature.parse_bytes(data)
+                        signatures.append(sig)
+                        hash_type = sig.hash_type
+                        blueprint.append('signature')
+                    except Exception as e:
+                        if strict:
+                            raise ScriptError(str(e))
+                        else:
+                            _logger.warning(str(e))
                 elif data_type == 'signature_object':
                     signatures.append(data)
                     hash_type = data.hash_type
@@ -363,33 +373,61 @@ class Script(object):
                         if _level >= 1:
                             blueprint.append('data-%d' % len(data))
                         else:
-                            s2 = Script.parse_bytes(data, _level=_level+1)
+                            s2 = Script.parse_bytes(data, _level=_level+1, strict=strict)
                             commands.pop()
-                            commands += s2.commands
-                            blueprint += s2.blueprint
+                            commands += [s2.commands]
+                            blueprint += [s2.blueprint]
                             keys += s2.keys
                             signatures += s2.signatures
-                            redeemscript = s2.redeemscript
+                            redeemscript_obj = s2
+                            redeemscript = s2.as_bytes()
                             sigs_required = s2.sigs_required
                     except (ScriptError, IndexError):
                         blueprint.append('data-%d' % len(data))
+                data = None
+                data_length = 0
             else:  # Other opcode
+                if 1 <= ch <= 75:  # Data`
+                    data_length = ch
+                elif ch == op.op_pushdata1:
+                    data_length = int.from_bytes(script.read(1), 'little')
+                elif ch == op.op_pushdata2:
+                    data_length = int.from_bytes(script.read(2), 'little')
+                if data_length:
+                    data = script.read(data_length)
+                    if len(data) != data_length:
+                        msg = "Malformed script, not enough data found"
+                        if strict:
+                            raise ScriptError(msg)
+                        else:
+                            chb = b''
+                            _logger.warning(msg)
+                    continue
+
                 commands.append(ch)
                 blueprint.append(ch)
 
-        s = cls(commands, message, keys=keys, signatures=signatures, blueprint=blueprint, tx_data=tx_data,
+            chb = script.read(1)
+            ch = int.from_bytes(chb, 'big')
+
+        if len(commands) == 1 and isinstance(commands[0], list):
+            commands = commands[0]
+        if len(blueprint) == 1 and isinstance(blueprint[0], list):
+            blueprint = blueprint[0]
+        s = cls(commands, message, keys=keys, signatures=signatures, blueprint=blueprint, env_data=env_data,
                 hash_type=hash_type)
         script.seek(0)
         s._raw = script.read()
 
-        s.script_types = _get_script_types(blueprint)
+        s.script_types = _get_script_types(blueprint, is_locking=is_locking)
         if 'unknown' in s.script_types:
             s.script_types = ['unknown']
 
         # Extract extra information from script data
         for st in s.script_types[:1]:
             if st == 'multisig':
-                s.redeemscript = s.raw
+                redeemscript_obj = s
+                s.redeemscript = s.as_bytes()
                 s.sigs_required = s.commands[0] - 80
                 if s.sigs_required > len(keys):
                     raise ScriptError("Number of signatures required (%d) is higher then number of keys (%d)" %
@@ -397,34 +435,39 @@ class Script(object):
                 if len(s.keys) != s.commands[-2] - 80:
                     raise ScriptError("%d keys found but %d keys expected" %
                                       (len(s.keys), s.commands[-2] - 80))
-            elif st in ['p2wpkh', 'p2wsh', 'p2sh'] and len(s.commands) > 1:
+            elif st in ['p2wpkh', 'p2wsh', 'p2sh', 'p2tr', 'p2sh_p2wpkh', 'p2sh_p2wsh'] and len(s.commands) > 1:
                 s.public_hash = s.commands[1]
+            elif st == 'p2tr_unlock':
+                s.public_hash = s.commands[0]
             elif st == 'p2pkh' and len(s.commands) > 2:
                 s.public_hash = s.commands[2]
         s.redeemscript = redeemscript if redeemscript else s.redeemscript
-        if s.redeemscript and 'redeemscript' not in s.tx_data:
-            s.tx_data['redeemscript'] = s.redeemscript
+        s.redeemscript_obj = redeemscript_obj
+        if s.redeemscript and 'redeemscript' not in s.env_data:
+            s.env_data['redeemscript'] = s.redeemscript
 
         s.sigs_required = sigs_required if sigs_required else s.sigs_required
 
         return s
 
     @classmethod
-    def parse_hex(cls, script, message=None, tx_data=None, strict=True, _level=0):
+    def parse_hex(cls, script, message=None, env_data=None, is_locking=None, strict=True, _level=0):
         """
         Parse raw script and return Script object. Extracts script commands, keys, signatures and other data.
 
         Wrapper for the :func:`parse_bytesio` method. Convert hexadecimal string script to BytesIO.
 
         >>> Script.parse_hex('76a914af8e14a2cecd715c363b3a72b55b59a31e2acac988ac')
-        <Script([op.op_dup, op.op_hash160, data-20, op.op_equalverify, op.op_checksig])>
+        <Script([op_dup, op_hash160, data-20, op_equalverify, op_checksig])>
 
         :param script: Raw script to parse in hexadecimal string format
         :type script: str
         :param message: Signed message to verify, normally a transaction hash
         :type message: bytes
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
-        :type tx_data: dict
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
+        :param is_locking: Is this a locking script or not, use None if not known and derive from script.
+        :param is_locking: bool, None
         :param strict: Raise exception when script is malformed, incomplete or not understood. Default is True
         :type strict: bool
         :param _level: Internal argument used to avoid recursive depth
@@ -432,10 +475,12 @@ class Script(object):
 
         :return Script:
         """
-        return cls.parse_bytesio(BytesIO(bytes.fromhex(script)), message, tx_data, strict, _level)
+        data_length = len(script) // 2
+        return cls.parse_bytesio(BytesIO(bytes.fromhex(script)), message, env_data, data_length, is_locking, strict,
+                                 _level)
 
     @classmethod
-    def parse_bytes(cls, script, message=None, tx_data=None, strict=True, _level=0):
+    def parse_bytes(cls, script, message=None, env_data=None, is_locking=None, strict=True, _level=0):
         """
         Parse raw script and return Script object. Extracts script commands, keys, signatures and other data.
 
@@ -445,8 +490,10 @@ class Script(object):
         :type script: bytes
         :param message: Signed message to verify, normally a transaction hash
         :type message: bytes
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
-        :type tx_data: dict
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
+        :param is_locking: Is this a locking script or not, use None if not known and derive from script.
+        :param is_locking: bool, None
         :param strict: Raise exception when script is malformed or incomplete
         :type strict: bool
         :param _level: Internal argument used to avoid recursive depth
@@ -454,29 +501,61 @@ class Script(object):
 
         :return Script:
         """
-        return cls.parse_bytesio(BytesIO(script), message, tx_data, strict, _level)
+        data_length = len(script)
+        return cls.parse_bytesio(BytesIO(script), message, env_data, data_length, is_locking, strict, _level)
+
+    @classmethod
+    def parse_str(cls, script, message=None, env_data=None, is_locking=None, strict=True, _level=0):
+        """
+        Parse script in string format and return Script object.
+        Extracts script commands, keys, signatures and other data.
+
+        >>> s = Script.parse_str("1 98 OP_ADD 99 OP_EQUAL")
+        >>> s
+        <Script([data-1, data-1, op_add, data-1, op_equal])>
+        >>> s.evaluate()
+        True
+
+        :param script: Raw script to parse in bytes format
+        :type script: str
+        :param message: Signed message to verify, normally a transaction hash
+        :type message: bytes
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts
+        :type env_data: dict
+        :param is_locking: Is this a locking script or not, use None if not known and derive from script.
+        :param is_locking: bool, None
+        :param strict: Raise exception when script is malformed or incomplete
+        :type strict: bool
+        :param _level: Internal argument used to avoid recursive depth
+        :type _level: int
+
+        :return Script:
+        """
+        items = script.split(' ')
+        s_items = []
+        for item in items:
+            if item.isdigit():
+                ival = int(item)
+                if 0 < ival <= 16:
+                    s_items.append(ival.to_bytes(1, 'big'))
+                else:
+                    s_items.append(int_to_varbyteint(ival))
+            elif item.startswith('OP_'):
+                s_items.append(getattr(op, item.lower(), 'unknown-command-%s' % item))
+            else:
+                s_items.append(bytes.fromhex(item))
+        return cls(s_items, message, env_data, is_locking=is_locking)
 
     def __repr__(self):
-        s_items = []
-        for command in self.blueprint:
-            if isinstance(command, int):
-                s_items.append('op.' + opcodenames.get(command, 'unknown-op-%s' % command).lower())
-            else:
-                s_items.append(command)
-        return '<Script([' + ', '.join(s_items) + '])>'
+        s_items = self.view(blueprint=True, as_list=True)
+        return '<Script([' + ', '.join(s_items).lower() + '])>'
 
     def __str__(self):
-        s_items = []
-        for command in self.blueprint:
-            if isinstance(command, int):
-                s_items.append(opcodenames.get(command, 'unknown-op-%s' % command))
-            else:
-                s_items.append(command)
-        return ' '.join(s_items)
+        return self.view(blueprint=True)
 
     def __add__(self, other):
         self.commands += other.commands
-        self._raw += other.raw
+        self._raw += other.as_bytes()
         if other.message and not self.message:
             self.message = other.message
         self.is_locking = None
@@ -484,8 +563,8 @@ class Script(object):
         self.signatures += other.signatures
         self._blueprint += other._blueprint
         self.script_types = _get_script_types(self._blueprint)
-        if other.tx_data and not self.tx_data:
-            self.tx_data = other.tx_data
+        if other.env_data and not self.env_data:
+            self.env_data = other.env_data
         if other.redeemscript and not self.redeemscript:
             self.redeemscript = other.redeemscript
         return self
@@ -494,18 +573,28 @@ class Script(object):
         return bool(self.commands)
 
     def __hash__(self):
-        return hash160(self.raw)
+        return hash160(self.as_bytes())
 
     @property
     def blueprint(self):
-        # TODO: create blueprint from commands if empty
         return self._blueprint
 
     @property
+    @deprecated
     def raw(self):
         if not self._raw:
             self._raw = self.serialize()
         return self._raw
+
+    def as_bytes(self):
+        if not self._raw:
+            self._raw = self.serialize()
+        return self._raw
+
+    def as_hex(self):
+        if not self._raw:
+            self._raw = self.serialize()
+        return self._raw.hex()
 
     def serialize(self):
         """
@@ -522,7 +611,7 @@ class Script(object):
             if isinstance(cmd, int):
                 raw += bytes([cmd])
             else:
-                raw += data_pack(cmd)
+                raw += data_pack(bytes(cmd))
         self._raw = raw
         return raw
 
@@ -544,13 +633,54 @@ class Script(object):
                 clist.append(bytes(cmd))
         return clist
 
-    def evaluate(self, message=None, tx_data=None):
+    def view(self, blueprint=False, as_list=False, op_code_numbers=False, show_1_byte_data_as_int=True):
+        """
+        View script as string in human-readable format.
+
+        :param blueprint: Show blueprint only, without detailed data.
+        :type blueprint: bool
+        :param as_list: Show script as list
+        :type as_list: bool
+        :param op_code_numbers: Show opcodes as numbers instead of string.
+        :type op_code_numbers: bool
+        :param show_1_byte_data_as_int: Show 1 byte data objects as integers.
+        :type show_1_byte_data_as_int: bool
+
+        :return str:
+        """
+        s_items = []
+        i = 0
+        for command in self.commands:
+            if isinstance(command, int):
+                if op_code_numbers:
+                    s_items.append(command)
+                else:
+                    s_items.append(opcodenames.get(command, 'unknown-op-%s' % command))
+            elif isinstance(command, list):
+                s_items.append('redeemscript')
+            else:
+                if blueprint:
+                    if self.blueprint and len(self.blueprint) >= i:
+                        s_items.append(self.blueprint[i])
+                    else:
+                        s_items.append('data-%d' % len(command))
+                else:
+                    chex = command.hex()
+                    if len(chex) == 2 and show_1_byte_data_as_int:
+                        s_items.append(int(chex, 16))
+                    else:
+                        s_items.append(chex)
+            i += 1
+
+        return s_items if as_list else ' '.join(str(i) for i in s_items)
+
+    def evaluate(self, message=None, env_data=None, trace=False):
         """
         Evaluate script, run all commands and check if it is valid
 
         >>> s = Script([op.op_2, op.op_4, op.op_add])
         >>> s
-        <Script([op.op_2, op.op_4, op.op_add])>
+        <Script([op_2, op_4, op_add])>
         >>> s.blueprint
         [82, 84, 147]
         >>> s.evaluate()
@@ -565,17 +695,34 @@ class Script(object):
 
         :param message: Signed message to verify, normally a transaction hash. Leave empty to use Script.message. If supplied Script.message will be ignored.
         :type message: bytes
-        :param tx_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for multisignature scripts and 'blockcount' for time locked scripts. Leave emtpy to use Script.tx_data. If supplied Script.tx_data will be ignored
+        :param env_data: Dictionary with extra information needed to verify script. Such as 'redeemscript' for
+        :type env_data: dict()
+        :param trace: Write trace information to stdout
+        :type trace: bool
+
+        multisignature scripts and 'blockcount' for time locked scripts. Leave emtpy to use Script.data. If supplied Script.data will be ignored
 
         :return bool: Valid or not valid
         """
         self.message = self.message if message is None else message
-        self.tx_data = self.tx_data if tx_data is None else tx_data
+        self.env_data = self.env_data if env_data is None else env_data
         self.stack = Stack()
 
-        commands = self.commands[:]
+        commands = []
+        for c in self.commands:
+            if isinstance(c, list):
+                commands += c
+            else:
+                commands.append(c)
         while len(commands):
             command = commands.pop(0)
+            if trace:
+                print("----------")
+                print("Stack:")
+                [print(f"- {i.hex()}") for i in self.stack]
+                cmd = opcodenames[command] if isinstance(command, int) else command.hex()
+                print(f"Command: {cmd}")
+                print("\n")
             if isinstance(command, int):
                 if command == op.op_0:  # OP_0
                     self.stack.append(encode_num(0))
@@ -596,13 +743,18 @@ class Script(object):
                         method = getattr(self.stack, method_name)
                         if method_name == 'op_checksig' or method_name == 'op_checksigverify':
                             res = method(self.message)
-                        elif method_name == 'op_checkmultisig' or method_name == 'op_checkmultisigverify':
-                            res = method(self.message, self.tx_data)
+                        elif method_name == 'op_checkmultisig':
+                            method(self.message, self.env_data)
+                            res = self.stack.op_verify()
+                            self.stack.append(self.env_data['redeemscript'])
+                        elif method_name == 'op_checkmultisigverify':
+                            res = method(self.message, self.env_data)
+                            self.stack.append(self.env_data['redeemscript'])
                         elif method_name == 'op_checklocktimeverify':
                             res = self.stack.op_checklocktimeverify(
-                                self.tx_data['sequence'], self.tx_data.get('locktime'))
+                                self.env_data['sequence'], self.env_data.get('locktime'))
                         elif method_name == 'op_checksequenceverify':
-                            res = self.stack.op_checksequenceverify(self.tx_data['sequence'], self.tx_data['version'])
+                            res = self.stack.op_checksequenceverify(self.env_data['sequence'], self.env_data['version'])
                         else:
                             res = method()
                         if res is False:
@@ -652,7 +804,7 @@ class Stack(list):
 
         :return list of int:
         """
-        # TODO: What to do with data/hashes?
+        # This converts data to integers as well, which might be no always useful
         return Stack([decode_num(x) for x in self])
 
     def pop_as_number(self):
@@ -669,7 +821,7 @@ class Stack(list):
 
     def is_arithmetic(self, items=1):
         """
-        Check if top stack item is or last stock are arithmetic and has no more then 4 bytes
+        Check if top stack item is or last stock are arithmetic and has no more than 4 bytes
 
         :return bool:
         """
@@ -868,6 +1020,14 @@ class Stack(list):
         return True
 
     def op_add(self):
+        """
+        Add the top 2 numbers of the stack and appends the result on the top of the stack.
+
+        Fails if the top 2 items are not arithmetic or if there are not enough items on the stack.
+
+        :return bool: Operation succeeded
+        """
+
         if not self.is_arithmetic(2):
             return False
         self.append(encode_num(self.pop_as_number() + self.pop_as_number()))
@@ -988,7 +1148,8 @@ class Stack(list):
         return True
 
     def op_ripemd160(self):
-        self.append(hashlib.new('ripemd160', self.pop()).digest())
+        # self.append(hashlib.new('ripemd160', self.pop()).digest())
+        self.append(ripemd160(self.pop()))
         return True
 
     def op_sha1(self):
@@ -1042,10 +1203,7 @@ class Stack(list):
                     break
 
         if sigcount == len(signatures):
-            if data and 'redeemscript' in data:
-                self.append(data['redeemscript'])
-            else:
-                self.append(b'\1')
+            self.append(b'\1')
         else:
             self.append(b'')
         return True
@@ -1178,7 +1336,7 @@ def decode_num(encoded):
     >>> decode_num(b'@B\\x0f')
     1000000
 
-    :param encoded: Number as bytes
+    :param encoded: Number to decode
     :type encoded: bytes
 
     :return int:
